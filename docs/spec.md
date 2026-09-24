@@ -2,7 +2,7 @@
 
 ## 交付边界与优先级
 
-本项目是独立的新网页，位于 windows-checker/。父目录的旧网页、安装器和部署配置均不修改。目标仓库为 765785/java-idea-checker，公开入口为 https://765785.github.io/java-idea-checker/；所有改动只属于该独立新站。
+本项目是独立的新网页，目标仓库为 765785/java-idea-checker，公开入口为 https://765785.github.io/java-idea-checker/；所有改动只属于该独立新站。旧 java-idea-installer 项目的网页、安装器和部署配置均不修改。
 
 仅支持 Windows 桌面端。页面本身可在 file:// 与 GitHub Pages 打开；不依赖后端、CDN、第三方库、远程字体、遥测或网络请求。桌面优先；疑似非 Windows 或窄屏时显示劝返提示，但不隐藏下载入口。
 
