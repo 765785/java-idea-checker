@@ -1,0 +1,26 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const os=require('node:os');
+const cp=require('node:child_process');
+const app=require('../assets/app.js');
+const templates=require('../assets/script-template.js');
+function fixture(){return {schemaVersion:1,meta:{collectedAt:new Date().toISOString(),user:'l***'},env:{effectiveJavaHome:'C:\\Java\\jdk-25',path:'%JAVA_HOME%\\bin',classpath:'%JAVA_HOME%\\lib'},exec:{java:{exitCode:0,output:'openjdk version "25"'},javac:{exitCode:0,output:'javac 25'}},javaProbe:{home:{path:'c:\\java\\jdk-25',valid:true},candidates:[{path:'c:\\java\\jdk-25',major:25,valid:true}],runtimeMatchesHome:true,compilerMatchesHome:true,runtimeMajor:25,compilerMajor:25,pathIncludesHome:true,whereJava:['c:\\java\\jdk-25\\bin\\java.exe'],whereJavac:['c:\\java\\jdk-25\\bin\\javac.exe'],forwarders:[]},idea:{installations:[]},jetbrainsDirs:[],jetbraTrace:[],emailScan:{tier:'NOT_FOUND',evidence:[]}}}
+test('normal machine and missing IDEA do not create Java failure',()=>{const r=app.analyze(fixture());assert.notEqual(r.status,'FAIL');assert.equal(r.repair,false);assert.equal(r.cards.find(x=>x.name==='IDEA 安装与版本').status,'MANUAL')});
+test('new machine needs JDK',()=>{const d=fixture();d.javaProbe.candidates=[];d.javaProbe.home={valid:false};d.exec={};const r=app.analyze(d);assert.equal(r.status,'FAIL');assert.match(r.repairLabel,/安装 JDK/)});
+test('JRE-only has dedicated compiler failure',()=>{const d=fixture();d.javaProbe.candidates=[];d.exec.javac={exitCode:1,output:''};const r=app.analyze(d);assert.match(r.repairLabel,/运行环境/);assert.equal(r.cards[0].status,'FAIL')});
+test('same-JDK forwarder does not fail',()=>{const d=fixture();d.javaProbe.forwarders=['C:\\Program Files\\Common Files\\Oracle\\Java\\javapath\\java.exe'];assert.notEqual(app.analyze(d).status,'FAIL')});
+test('different real target fails',()=>{const d=fixture();d.javaProbe.runtimeMatchesHome=false;assert.equal(app.analyze(d).status,'FAIL')});
+test('unresolved target warns, never claims mismatch',()=>{const d=fixture();d.javaProbe.runtimeMatchesHome=null;assert.equal(app.analyze(d).cards.find(x=>x.name.includes('是否一致')).status,'WARN')});
+test('JDK 8 plus 25 warns without repair',()=>{const d=fixture();d.javaProbe.runtimeMajor=8;d.javaProbe.compilerMajor=8;const r=app.analyze(d);assert.equal(r.status,'WARN');assert.equal(r.repair,false);assert.match(r.cards.find(x=>x.name==='本机其他 JDK 版本').advice,/当前生效的是 JDK 8，本机还检测到 JDK 25/)});
+test('independent failure still permits repair',()=>{const d=fixture();d.javaProbe.runtimeMajor=8;d.javaProbe.compilerMajor=8;d.javaProbe.pathIncludesHome=false;assert.equal(app.analyze(d).repair,true)});
+test('missing disk produces specific instruction',()=>{const d=fixture();d.javaProbe.home.valid=false;d.javaProbe.diskUnavailable=true;assert.match(app.analyze(d).cards[1].advice,/磁盘现在不可用/)});
+test('four email tiers stay evidence only',()=>{for(const tier of ['EMAIL_EXACT','DOMAIN_ONLY','OTHER_EMAIL','NOT_FOUND']){const d=fixture();d.emailScan.tier=tier;const card=app.analyze(d).cards.at(-1);assert.doesNotMatch(card.advice,/认证成功/);if(tier==='NOT_FOUND')assert.match(card.advice,/不等于认证失败/)}});
+test('console extraction respects quoted braces',()=>{const d=fixture();d.meta.note='a } { \\"';assert.equal(app.parseResult('prefix\n'+JSON.stringify(d)+'\nsuffix').schemaVersion,1)});
+test('old schema rejected',()=>{const d=fixture();d.schemaVersion=0;assert.throws(()=>app.parseResult(JSON.stringify(d)),/版本过旧/)});
+test('truncated JSON explains next step',()=>{assert.throws(()=>app.parseResult('{"schemaVersion":1'),/没有复制完整/)});
+test('email masking is safe',()=>{assert.equal(app.mask('lisa@school.edu.cn'),'l***@school.edu.cn')});
+test('both BATs ASCII and Unicode payload roundtrip',()=>{for(const bat of [templates.buildCheckerBat('li@school.edu.cn'),templates.buildRepairBat({})]){assert.doesNotMatch(bat,/[^\x00-\x7f]/);assert.match(bat,/set "SELF=%~f0"/);const b=Buffer.from(bat.match(/:PAYLOAD_BEGIN\r\n([^\r]+)/)[1],'base64');assert.equal(b.readUInt16LE(0),0xfeff);assert.match(b.toString('utf16le'),/function Normalize-Directory/);assert.ok(bat.split('\r\n')[3].length<8191)}});
+test('PowerShell 5.1 parses generated checker and repair', {skip:process.platform!=='win32'},()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'java-ast-'));try{for(const [name,bat] of [['checker',templates.buildCheckerBat('li@school.edu.cn')],['repair',templates.buildRepairBat()]]){const file=path.join(dir,name+'.ps1');fs.writeFileSync(file,Buffer.from(bat.match(/:PAYLOAD_BEGIN\r\n([^\r]+)/)[1],'base64'));const command="$e=$null; $t=$null; [System.Management.Automation.Language.Parser]::ParseFile('"+file.replace(/'/g,"''")+"',[ref]$t,[ref]$e)|Out-Null; if($e.Count){$e|ForEach-Object{$_.ToString()};exit 1}";const r=cp.spawnSync('powershell.exe',['-NoProfile','-Command',command],{encoding:'utf8'});assert.equal(r.status,0,r.stdout+r.stderr)}}finally{fs.rmSync(dir,{recursive:true,force:true})}});
+module.exports={fixture};
