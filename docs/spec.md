@@ -256,4 +256,4 @@ B 区只允许一条固定链：IDEA 安装/版本 → JetBrains/Toolbox 配置�
 
 该消息须附 Release 链接，不能显示 undefined、空白或异常。离线哈希不可用不阻止下载 ZIP。
 
-固定发布资产通过 GitHub Release 提供，并公布文件、SHA-256、版本、日期。生成型 ZIP 的哈希因教育邮箱而不同，网页可显示当前 ZIP 的哈希，但不能把它冒充固定发行哈希。Pages 工作流在发布前运行自动测试并发布 dist；真实 Explorer 解压、杀软多引擎、普通 VM winget 安装、UAC/跨账户、受控机房与公开 Release/Pages 状态必须按 TESTING.md 如实标记，不能用 mock、Sandbox 或未执行的计划宣布通过。
+固定发布资产通过 GitHub Release 提供，并公布文件、SHA-256、版本、日期。网页生成的外层名保持 JavaIDEA自检工具.zip，且哈希因教育邮箱而不同；固定 Release 可使用 ASCII 别名，不能把任意生成 ZIP 的哈希冒充固定发行哈希。Pages 工作流在发布前运行自动测试并发布 dist；真实 Explorer 解压、杀软多引擎、普通 VM winget 安装、UAC/跨账户、受控机房与公开 Release/Pages 状态必须按 TESTING.md 如实标记，不能用 mock、Sandbox 或未执行的计划宣布通过。

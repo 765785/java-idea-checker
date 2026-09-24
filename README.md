@@ -80,10 +80,12 @@ IDEA 未安装时可主动打开 [IntelliJ IDEA 官方下载页](https://www.jet
 
 网页为每次生成的 JavaIDEA自检工具.zip 显示该次 ZIP 的 SHA-256（若浏览器安全上下文不支持计算，会明确提示）。固定发布文件的哈希以 GitHub Release 页面为准；在没有建立固定 Release 前，不应把任意本地生成 ZIP 当作稳定发行版。
 
+网页生成时的外层 ZIP 名始终是 **JavaIDEA自检工具.zip**。为避免 Release 上传链路的文件名编码差异，固定发布资产使用清晰的 ASCII 别名；它不含个人邮箱，内容与同版本的空邮箱工具包一致。
+
 | 文件 | SHA-256 | 版本 | 日期 |
 | --- | --- | --- | --- |
-| JavaIDEA自检工具.zip | 以对应 GitHub Release 资产页公布值为准 | 待固定发行版 | 待发布 |
-| dist/JavaIDEA自检工具-离线版.html | 以对应 GitHub Release 资产页公布值为准 | 待固定发行版 | 待发布 |
+| Release: JavaIDEA-checker.zip | `976a54f42b0fabea24882904e4265f3724bd57df8ead2296986b11d42652fa84` | v1.0.0 | 2026-09-25 |
+| Release: JavaIDEA-checker-offline.html | `e7ec5186335a4cde23e3f9241eaebcc1af89e890642536b03a9959adf776f34b` | v1.0.0 | 2026-09-25 |
 
 核对命令：Get-FileHash -LiteralPath "C:\路径\JavaIDEA自检工具.zip" -Algorithm SHA256
 
