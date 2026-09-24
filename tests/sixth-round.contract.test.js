@@ -305,8 +305,9 @@ test('N31: 模拟没有剪贴板 cmdlet 的环境仍将 result.txt 落盘', { sk
   try {
     const checker = path.join(directory, 'JavaCheck.ps1');
     fs.writeFileSync(checker, withBom(need(Templates, 'buildCheckerPs1')('')));
-    // A copied cmd.exe prevents the fallback `clip.exe` lookup from touching the real clipboard.
-    fs.copyFileSync(process.env.ComSpec || path.join(process.env.SystemRoot, 'System32', 'cmd.exe'), path.join(directory, 'clip.exe'));
+    // Force the fallback path to fail quickly without touching the real clipboard.
+    // A copied cmd.exe can consume JSON as batch input and hang on hosted runners.
+    fs.copyFileSync(path.join(process.env.SystemRoot, 'System32', 'where.exe'), path.join(directory, 'clip.exe'));
     const escapedChecker = checker.replace(/'/g, "''");
     const escapedDirectory = directory.replace(/'/g, "''");
     const command = "$original=Microsoft.PowerShell.Core\\Get-Command;function Get-Command {param([Parameter(Position=0)]$Name,[Parameter(ValueFromRemainingArguments=$true)]$Rest) if([string]$Name -match '^(Set|Get)-Clipboard$'){return $null}; & $original $Name @Rest};$env:Path='" + escapedDirectory.replace(/'/g, "''") + ";'+$env:Path;& '" + escapedChecker + "' -EduEmail '' -OutputDirectory '" + escapedDirectory + "'";
