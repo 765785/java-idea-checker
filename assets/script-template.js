@@ -59,7 +59,7 @@ function Normalize-Directory([string]$Value, [switch]$StripBin) {
   } catch { Record-Issue 'path.normalize' $_; return $null }
 }
 function Is-Forwarder([string]$Path) { return $Path -match '(?i)\\(?:System32|SysWOW64|WindowsApps)(?:\\|$)|\\Common Files\\Oracle\\Java\\javapath(?:\\|$)' }
-function Get-Major([string]$Text) { if ($Text -match '(?:version\s+"?|javac\s+|openjdk\s+)(1\.)?(\d+)') { return [int]$Matches[2] }; return 0 }
+function Get-Major([string]$Text) { if ($Text -match '(?i)(?:version|版本|javac|openjdk)\s+"?(?:1\.)?(\d+)') { return [int]$Matches[1] }; return 0 }
 function Read-EnvironmentValue([string]$Scope,[string]$Name) {
   $key=$null
   try {
@@ -176,12 +176,15 @@ function Get-Trace {
   foreach ($scope in @('User','Machine')) { try { $all=[Environment]::GetEnvironmentVariables($scope); foreach ($name in $all.Keys) { if ($name -match 'jetbra|pojie|_VM_OPTIONS$') { [pscustomobject]@{scope=$scope;name=$name;matched=($name -match 'jetbra|pojie' -or [string]$all[$name] -match 'jetbra|pojie')} } } } catch { Record-Issue 'trace' $_ } }
 }
 function Collect-Result([string]$Email) {
+  Write-Host '【1/4】正在检查 JAVA_HOME 和 Path...'
   $snapshot=Get-EnvironmentSnapshot; $effective=Get-EffectiveHome $snapshot
   $whereJava=@(Get-Where java); $whereJavac=@(Get-Where javac)
+  Write-Host '【2/4】正在验证 java 与 javac...'
   $j=Invoke-Captured java @('-version'); $c=Invoke-Captured javac @('-version'); $settings=Invoke-Captured java @('-XshowSettings:properties','-version')
   $candidates=@(Find-Jdks $snapshot $whereJavac); $probe=Probe-Jdk $effective 'JAVA_HOME'; $evidence=Runtime-Evidence $settings $whereJavac
   $includes=$false; $rawPaths=@(); foreach ($value in @($snapshot.machine.Path.value,$snapshot.user.Path.value,$env:Path)) { foreach ($entry in ([string]$value -split ';')) { if ($entry -match 'java|jdk|jetbrains') { $rawPaths+=$entry }; $expanded=$entry -replace '(?i)%JAVA_HOME%',([string]$probe.path).Replace('$','$$'); if ($probe.path -and (Normalize-Directory $expanded) -eq ($probe.path+'\bin')) { $includes=$true } } }
   $diskUnavailable=$false; if ($effective -match '^([a-zA-Z]:)') { $diskUnavailable=!(Test-Path ($Matches[1]+'\')) }
+  Write-Host '【3/4】正在检查 IDEA、Toolbox 与教育邮箱证据...'
   $dirs=@(Invoke-Section 'directories' {Get-DirectoryEvidence} @()); $idea=Invoke-Section 'idea' {Get-Idea} ([pscustomobject]@{installations=@();error='采集失败'}); $emailScan=Invoke-Section 'emailScan' {Get-EmailEvidence $Email} ([pscustomobject]@{tier='NOT_FOUND';evidence=@();scanned=0;truncated=$true}); $trace=@(Invoke-Section 'trace' {Get-Trace} @())
   $class=@((Read-EnvironmentValue User CLASSPATH).value,(Read-EnvironmentValue Machine CLASSPATH).value) -join ';'
   $username=[Environment]::UserName; if ($username.Length) { $username=$username.Substring(0,1)+'***' }
@@ -200,21 +203,34 @@ function Convert-SafeJson($Data) {
 }
 function Copy-ClipboardFallback([string]$Json) {
   $old=$OutputEncoding
-  try { $OutputEncoding=New-Object Text.UTF8Encoding($false); $Json | & (Join-Path $env:SystemRoot 'System32\cmd.exe') /d /c 'chcp 65001>nul & clip.exe'; if ($LASTEXITCODE -ne 0 -or (Get-Clipboard -Raw -ErrorAction Stop).TrimEnd([char]13,[char]10) -ne $Json) { throw '备用剪贴板复制或回读失败' } } finally { $OutputEncoding=$old }
+  try {
+    $OutputEncoding=New-Object Text.UTF8Encoding($false)
+    $Json | & (Join-Path $env:SystemRoot 'System32\cmd.exe') /d /c 'chcp 65001>nul & clip.exe'
+    if ($LASTEXITCODE -ne 0) { throw '备用剪贴板复制失败' }
+    $getClipboard=Get-Command Get-Clipboard -ErrorAction SilentlyContinue
+    if ($getClipboard -and ((Get-Clipboard -Raw -ErrorAction Stop).TrimEnd([char]13,[char]10) -ne $Json)) { throw '备用剪贴板回读不一致' }
+  } finally { $OutputEncoding=$old }
 }
 function Save-Result($Data,[string]$Directory) {
   $destination=Join-Path $Directory 'result.txt'; $json=Convert-SafeJson $Data
   try { [IO.File]::WriteAllText($destination,$json,(New-Object Text.UTF8Encoding($true))) } catch { Record-Issue 'result.write' $_ }
-  try { Set-Clipboard -Value $json -ErrorAction Stop; if ((Get-Clipboard -Raw -ErrorAction Stop).TrimEnd([char]13,[char]10) -ne $json) { throw '剪贴板回读不一致' } }
+  try {
+    $setClipboard=Get-Command Set-Clipboard -ErrorAction SilentlyContinue
+    $getClipboard=Get-Command Get-Clipboard -ErrorAction SilentlyContinue
+    if (!$setClipboard -or !$getClipboard) { throw '当前 PowerShell 没有可用的剪贴板命令' }
+    Set-Clipboard -Value $json -ErrorAction Stop
+    if ((Get-Clipboard -Raw -ErrorAction Stop).TrimEnd([char]13,[char]10) -ne $json) { throw '剪贴板回读不一致' }
+  }
   catch {
     Record-Issue 'clipboard.primary' $_; $json=Convert-SafeJson $Data
     try { Copy-ClipboardFallback $json } catch { Record-Issue 'clipboard.fallback' $_ }
   }
   $json=Convert-SafeJson $Data
   try { [IO.File]::WriteAllText($destination,$json,(New-Object Text.UTF8Encoding($true))) } catch { Record-Issue 'result.write.final' $_; Write-Host '结果文件无法保存，请复制下面的 JSON。' }
-  Write-Host '采集完成。请返回网页粘贴；也可拖入本文件夹中的 result.txt。'
   Write-Host ('发现完整 JDK：'+@($Data.javaProbe.candidates | Where-Object {$_.valid}).Count+'；IDEA 安装：'+$Data.idea.installations.Count)
   Write-Host '---JAVA_CHECK_JSON_BEGIN---'; Write-Host $json; Write-Host '---JAVA_CHECK_JSON_END---'
+  Write-Host '【4/4】完成'
+  Write-Host '请回到浏览器，在第 2 步的框里按 Ctrl+V，然后点解析。'
 }
 `;
   const repair = String.raw`
@@ -275,7 +291,7 @@ function Install-Jdk {
 }
 function Repair-UserEnvironment($Snapshot,$Target,[string]$Directory) {
   $plan=New-RepairPlan $Snapshot $Target
-  $key=$null; try { $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment',$true); if (!$key) {throw [UnauthorizedAccessException]::new('无法写入 HKCU Environment')} } finally {if ($key) {$key.Dispose()}}
+  $key=$null; try { $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment',$true); if (!$key) {throw (New-Object UnauthorizedAccessException '无法写入 HKCU Environment')} } finally {if ($key) {$key.Dispose()}}
   $backup=Save-Backups $Snapshot $Directory
   $changed=New-Object 'System.Collections.Generic.List[string]'
   try {
@@ -301,13 +317,10 @@ function Start-Repair([string]$Directory) {
     if (!$target) {
       $null=Save-Backups $snapshot $Directory
       $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-      $helper=Join-Path ([IO.Path]::GetTempPath()) ('java-install-'+[Guid]::NewGuid().ToString('N')+'.ps1')
-      $tail="\r\n" # replaced below with Environment.NewLine
-      $tail=[Environment]::NewLine+"if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne '"+$sid+"') { Write-Host '跨账户提权已停止：请使用自己的账户或联系管理员。'; exit 3 }; try { Install-Jdk; exit 0 } catch { Write-Host ([string]"+'$_'+"); exit 1 }"
-      try {
-        [IO.File]::WriteAllText($helper,$script:Library+$tail,[Text.Encoding]::Unicode)
-        try { $process=Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Verb RunAs -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "'+$helper+'"') -Wait -PassThru -ErrorAction Stop; if ($process.ExitCode -eq 3) {throw '跨账户提权被阻止，未运行安装。'}; if ($process.ExitCode -ne 0) {Record-Issue 'installation' ('安装进程退出码 '+$process.ExitCode)} } catch {Record-Issue 'elevation' $_; Write-Host '安装没有完成，将重新检查本机是否已有可复用 JDK。'}
-      } finally {if (Test-Path -LiteralPath $helper) {Remove-Item -LiteralPath $helper -ErrorAction SilentlyContinue}}
+      $scriptFile=Join-Path $PSScriptRoot 'JavaRepair.ps1'
+      if (!(Test-Path -LiteralPath $scriptFile)) { throw '找不到同目录的 JavaRepair.ps1，未申请管理员权限。' }
+      $args='-NoProfile -ExecutionPolicy Bypass -File "'+$scriptFile.Replace('"','""')+'" -InstallOnly -ExpectedSid "'+$sid+'" -OutputDirectory "'+$Directory.Replace('"','""')+'"'
+      try { $process=Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Verb RunAs -ArgumentList $args -Wait -PassThru -ErrorAction Stop; if ($process.ExitCode -eq 3) {throw '跨账户提权已停止，未运行安装。'}; if ($process.ExitCode -ne 0) {Record-Issue 'installation' ('安装进程退出码 '+$process.ExitCode)} } catch {Record-Issue 'elevation' $_; Write-Host '安装没有完成，将重新检查本机是否已有可复用 JDK。'}
       $snapshot=Get-EnvironmentSnapshot; $target=Select-Jdk @(Find-Jdks $snapshot @(Get-Where javac))
       if (!$target) {throw '本机仍没有可用 JDK，未修改环境变量。请到 https://adoptium.net/installation 下载 JDK，解压到可写目录，设置或在 IDEA 中选择该 JDK，然后重新检测。'}
     }
@@ -316,34 +329,72 @@ function Start-Repair([string]$Directory) {
     Record-Issue 'repair.final' $_
     if ($_.Exception -is [UnauthorizedAccessException] -or [string]$_ -match 'denied|拒绝|权限') {Write-Host '这台电脑的环境变量或目录被管理员锁定，无法自动修改。请联系机房管理员，或使用绿色版 JDK 解压到可写目录后请管理员协助配置。'} else {Write-Host ([string]$_)}
   }
-  Write-Host '请关闭本窗口，以普通权限重新双击“一键检测.bat”，再把新结果粘贴到网页。'
+  Write-Host '请关闭本窗口，以普通权限重新双击“JavaCheck.bat”，再把新结果粘贴到网页。'
 }
 `;
-  function base64Unicode(text, bom) {
-    let binary = bom ? '\xff\xfe' : '';
-    for (let i = 0; i < text.length; i++) { const n = text.charCodeAt(i); binary += String.fromCharCode(n & 255, n >>> 8); }
-    return typeof btoa === 'function' ? btoa(binary) : Buffer.from(binary, 'binary').toString('base64');
+  const scriptHeader = String.raw`# Java IDEA Windows Self-Check Tool
+# https://github.com/765785/java-idea-checker
+# MIT License. This readable script collects local Java/IDEA evidence and may repair
+# only the current user's JAVA_HOME and Path after backup. It does not remove files,
+# change CLASSPATH, alter IDEA login or activate any license.
+# Security software can still review scripts with these legitimate system actions.
+`;
+  const scriptBootstrap = String.raw`
+if (!$PSVersionTable -or [int]$PSVersionTable.PSVersion.Major -lt 3) {
+  Write-Host '你的 Windows 版本较旧，请升级 PowerShell 或使用页面上的手动检查步骤。'
+  exit 2
+}
+if ($env:OS -ne 'Windows_NT') {
+  Write-Host '本工具只支持 Windows 桌面系统，请在要检测的 Windows 电脑上运行。'
+  exit 3
+}
+try { $Host.UI.RawUI.WindowTitle='Java 环境自检工具' } catch {}
+`;
+  function buildCheckerBat() {
+    return '@echo off & title Java Environment Checker\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0JavaCheck.ps1"\r\npause\r\n';
   }
-  function wrapBat(script) {
-    const loader = String.raw`$ErrorActionPreference='Stop'; $temp=$null; try { $source=$env:SELF; if (!$source -or !(Test-Path -LiteralPath $source)) { throw 'Cannot locate BAT file' }; $text=Get-Content -LiteralPath $source -Raw; $m=[regex]::Match($text,'(?s)\r?\n:PAYLOAD_BEGIN\r?\n([A-Za-z0-9+/=]+)\r?\n:PAYLOAD_END'); if (!$m.Success) { throw 'Invalid BAT payload; download again' }; $temp=Join-Path ([IO.Path]::GetTempPath()) ('java-check-'+[Guid]::NewGuid().ToString('N')+'.ps1'); [IO.File]::WriteAllBytes($temp,[Convert]::FromBase64String($m.Groups[1].Value)); & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $temp -OutputDirectory (Split-Path -Parent $source) } catch { Write-Host $_ } finally { if ($temp -and (Test-Path -LiteralPath $temp)) { Remove-Item -LiteralPath $temp -ErrorAction SilentlyContinue } }`;
-    return '@echo off\r\nsetlocal DisableDelayedExpansion\r\nset "SELF=%~f0"\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand ' + base64Unicode(loader, false) + '\r\npause\r\nexit /b\r\n:PAYLOAD_BEGIN\r\n' + base64Unicode(script, true) + '\r\n:PAYLOAD_END\r\n';
+  function buildRepairBat() {
+    return '@echo off & title Java Environment Checker\r\nif not exist "%~dp0JavaCheck.ps1" (powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0JavaRepair.ps1" -MissingChecker) else powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0JavaRepair.ps1"\r\npause\r\n';
   }
   function buildCheckerPs1(email = '') {
     const literal = String(email).replace(/'/g, "''");
-    return "param([string]$EduEmail = '" + literal + "', [string]$OutputDirectory)\r\n" + common + collector + String.raw`
+    return '\uFEFF' + scriptHeader + "\r\nparam([string]$EduEmail = '" + literal + "', [string]$OutputDirectory)\r\n" + scriptBootstrap + common + collector + String.raw`
 try {
-  if (!$OutputDirectory) { throw '请通过下载的一键检测 BAT 运行。' }
+  if (!$OutputDirectory) { $OutputDirectory=$PSScriptRoot }
   if (!$EduEmail) { $EduEmail=Read-Host '请输入教育邮箱（可留空）' }
   $data=Collect-Result $EduEmail
   Save-Result $data $OutputDirectory
-} catch { Record-Issue 'collector.final' $_; Write-Host ('采集未能完成，请联系助教：'+(Protect-Text ([string]$_))) }
+} catch {
+  Record-Issue 'collector.final' $_
+  Write-Host '检测没有完成。请确认 ZIP 已完整解压、PowerShell 版本满足要求，然后重试或使用网页手动检查步骤。'
+}
+Write-Host '按任意键关闭窗口。'
 `;
   }
-  function buildRepairBat() {
-    const library = common + repair;
-    return wrapBat('param([string]$OutputDirectory)\r\n' + library + "\r\n$script:Library=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('" + base64Unicode(library, false) + "'))\r\nStart-Repair $OutputDirectory\r\n");
+  function buildRepairPs1() {
+    return '\uFEFF' + scriptHeader + "\r\nparam([switch]$MissingChecker,[switch]$InstallOnly,[string]$ExpectedSid,[string]$OutputDirectory)\r\n" + scriptBootstrap + common + repair + String.raw`
+if (!$OutputDirectory) { $OutputDirectory=$PSScriptRoot }
+if ($MissingChecker) {
+  Write-Host '请把本文件和检测脚本放在同一个文件夹里。请重新解压 JavaIDEA自检工具.zip，并确认 JavaCheck.ps1 仍在文件夹中。'
+  Write-Host '按任意键关闭窗口。'
+  exit 2
+}
+if ($InstallOnly) {
+  $script:LogFile=Join-Path $OutputDirectory 'repair.log'
+  if ($ExpectedSid -and [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne $ExpectedSid) {
+    Write-Host '跨账户提权已停止：请使用自己的账户运行，或联系管理员。'
+    exit 3
   }
-  const api = { buildCheckerPs1, buildCheckerBat: email => wrapBat(buildCheckerPs1(email)), buildRepairBat, wrapBat, common, collector, repair };
+  try { Install-Jdk; exit 0 } catch { Record-Issue 'installOnly' $_; Write-Host 'JDK 安装没有完成。请检查网络、管理员权限，或按网页中的手动安装步骤操作。'; exit 1 }
+}
+Start-Repair $OutputDirectory
+Write-Host '按任意键关闭窗口。'
+`;
+  }
+  function buildReadmeFirst() {
+    return 'Java IDEA 自检工具 - 请先阅读\r\n\r\n1. 先双击 JavaCheck.bat 做检测。\r\n2. 只有网页提示需要修复时，才运行 JavaRepair.bat。\r\n3. 不要“以管理员身份运行” JavaCheck.bat。\r\n4. 如果被安全软件拦截，请回到网页展开“被安全软件拦截怎么办？”查看处理步骤。\r\n\r\n请确认文件夹里有 4 个脚本文件和本说明 txt。\r\n';
+  }
+  const api = { buildCheckerPs1, buildCheckerBat, buildRepairPs1, buildRepairBat, buildReadmeFirst, common, collector, repair };
   root.ScriptTemplates = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

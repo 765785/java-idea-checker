@@ -1,9 +1,143 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><title>Java 环境与 IDEA 学生认证自检</title><link rel="stylesheet" href="assets/style.css"><script src="assets/script-template.js" defer></script><script src="assets/app.js" defer></script></head>
-<body><a class="skip" href="#email">跳到检测操作</a><header><h1>Java 环境与 IDEA 学生认证自检</h1><p>浏览器出于安全限制无法读取别人电脑的环境变量，所以采用「本地脚本采集 + 网页判定渲染」的方式；所有数据只在用户自己电脑上流转，网页不发往任何服务器。</p></header><main>
-<section class="step"><span class="number" aria-hidden="true">1</span><div class="body"><h2>输入教育邮箱并生成脚本</h2><p>Windows 10 / 11 适用。只需下载一个文件，双击即可检测。检测不会安装软件或修改环境变量。</p><div class="columns"><div><label for="email">教育邮箱（也可留空后在脚本中输入）</label><input id="email" type="email" placeholder="例如 li@school.edu.cn" autocomplete="off" maxlength="254"><p class="small">生成后邮箱仅存此浏览器，并写入个人脚本。请勿转发。</p><button id="generate" class="primary">生成并下载一键检测.bat</button><a id="download" class="button" download="一键检测.bat" hidden>再次下载检测 BAT</a></div><aside><h3>下载后这样操作</h3><ol><li>普通双击“一键检测.bat”，保持窗口打开。</li><li>等待“采集完成”，结果自动复制到剪贴板。</li><li>返回下方粘贴，或拖入同文件夹的 result.txt。</li></ol><p class="small">不要“以管理员身份运行”检测。如果下载被阻止，先核对来源，再查看文件“属性 → 解除锁定”；仍被拦截请联系管理员。</p></aside></div></div></section>
-<section class="step"><span class="number" aria-hidden="true">2</span><div class="body"><h2>粘贴检测结果</h2><p>支持 JSON、完整控制台原文，或直接拖入 result.txt。分析全部在浏览器内完成。</p><label class="sr-only" for="input">检测结果</label><textarea id="input" rows="7" spellcheck="false" placeholder="在这里 Ctrl+V，或把 result.txt 拖到这里"></textarea><div class="actions"><button id="analyze" class="primary">开始分析</button><label class="button" for="file">选择 result.txt</label><input id="file" type="file" accept=".txt,.json,text/plain,application/json"></div></div></section>
-<p id="notice" role="status" aria-live="polite"></p>
-<section class="step"><span class="number" aria-hidden="true">3</span><div class="body"><div class="result-heading"><h2>查看检测结论</h2><div class="actions"><button id="export" disabled>导出结果 txt</button><button id="clear">清空本机保存的邮箱</button></div></div><div class="summary"><span id="overall" class="badge"></span><h3 id="summary">检测结论将显示在这里</h3><p id="meta" class="small">请完成上方两步。教育许可证仍需在 IDEA 的订阅管理中人工确认。</p><button id="repair" class="primary" hidden>一键修复环境变量</button></div><details><summary>修复会做什么？</summary><p>有可用 JDK 时仅修当前用户的 JAVA_HOME 和 Path，无需管理员、无需联网。先在修复 BAT 同级建立 backup-时间戳目录，分别备份用户级和系统级原值；失败回滚本次修改。没有 JDK 时才联网安装，可能出现管理员确认。</p><p>系统 Path 旧 Java 若仍排在前面，需要管理员处理。不会改 CLASSPATH、删除 jetbra/pojie、修改 IDEA 登录或许可证。完成后关闭窗口，重新普通双击检测 BAT，再粘贴新结果。</p></details><div id="cards"></div><aside id="confirmation" class="confirmation" hidden><h3>最后一步：到 IDEA 里确认教育包</h3><p>即使 EMAIL_EXACT 命中，也只证明「IDEA 里登录/绑定过这个教育邮箱」，不等于教育包已激活。</p><ol><li>进入管理订阅（Manage Subscriptions）。</li><li>找到教育包；未显示时点击 Refresh license list。</li><li>选择教育包，点击 Activate。</li></ol><p><a href="https://www.jetbrains.com/help/idea/register.html" target="_blank" rel="noopener noreferrer">官方激活说明</a> · <a href="https://www.jetbrains.com/idea/download/" target="_blank" rel="noopener noreferrer">IDEA 官方下载页</a>（装完再回来做学生认证）</p></aside></div></section>
-<section class="help"><h2>没有 JDK 或自动安装没有完成？</h2><ol class="manual-steps"><li><strong>① 下载 JDK</strong><p>打开 <a href="https://adoptium.net/temurin/releases/?version=25" target="_blank" rel="noopener noreferrer">Adoptium 官方下载页</a>，选 Windows、JDK 25 和对应架构。无管理员权限时选 ZIP。</p></li><li><strong>② 安装或解压</strong><p>运行安装包或将 ZIP 解压到可写目录。文件夹内应有 bin\java.exe 和 bin\javac.exe。放在个人 .jdks 目录可被自动发现。</p></li><li><strong>③ 重新检测</strong><p>再次运行检测 BAT，粘贴新结果。受控电脑请联系机房管理员，也可先在 IDEA 的 Project SDK 中选择解压的 JDK。</p></li></ol></section>
-</main><footer>本地检测 · 离线分析 · 学生认证由本人确认 <a href="README.md">使用说明</a></footer></body></html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Java 环境与 IDEA 学生认证自检</title>
+  <link rel="stylesheet" href="assets/style.css">
+  <script src="assets/script-template.js" defer></script>
+  <script src="assets/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#email">跳到检测操作</a>
+  <header>
+    <p class="eyebrow">Windows 桌面端自检工具</p>
+    <h1>Java 环境与 IDEA 学生认证自检</h1>
+    <p>浏览器出于安全限制无法读取别人电脑的环境变量，所以采用「本地脚本采集 + 网页判定渲染」的方式；所有数据只在用户自己电脑上流转，网页不发往任何服务器。</p>
+    <p class="desktop-reminder">请在你要检测的 Windows 电脑上打开本网页。手机可查看说明，但不能检测 Windows 环境。</p>
+    <p id="device-warning" class="device-warning" hidden>当前浏览器看起来不是 Windows 桌面环境。请把此网页在需要检测的 Windows 电脑上打开。</p>
+  </header>
+
+  <main>
+    <section class="flow" aria-label="使用流程">
+      <span>1. 下载压缩包</span><span>2. 运行检测</span><span>3. 粘贴结果</span><span>4. 按提示修复并复检</span>
+    </section>
+
+    <section class="step">
+      <span class="number" aria-hidden="true">1</span>
+      <div class="body">
+        <h2>下载检测工具压缩包</h2>
+        <p>适用于 Windows 7 SP1 / 8.1 / 10 / 11 的桌面电脑。下载一个压缩包，解压后双击检测脚本；检测只采集信息，不会安装软件或修改环境变量。</p>
+        <div class="columns">
+          <div>
+            <label for="email">教育邮箱（可留空）</label>
+            <input id="email" type="email" placeholder="例如 li@school.edu.cn" autocomplete="off" maxlength="254">
+            <p id="email-hint" class="small"></p>
+            <p class="small">邮箱只保存在这个浏览器的 localStorage，并烧录到你自己生成的检测脚本中；网页不会上传它。请勿把 ZIP 转发给他人。</p>
+            <button id="generate" class="primary">生成并下载 JavaIDEA自检工具.zip</button>
+            <p id="hash-status" class="small" aria-live="polite"></p>
+            <p class="small">如需核验下载文件，可在 <a id="release-link" href="https://github.com/765785/java-idea-checker/releases" target="_blank" rel="noopener noreferrer">GitHub Release 页面</a>查看公开 SHA-256。</p>
+          </div>
+          <aside>
+            <h3>下载后这样操作</h3>
+            <ol>
+              <li>右键 ZIP → 属性 → 若有“解除锁定”就勾选，再解压。</li>
+              <li>确认文件夹里有 4 个脚本文件和 1 个说明 txt：<code>JavaCheck.bat</code>、<code>JavaCheck.ps1</code>、<code>JavaRepair.bat</code>、<code>JavaRepair.ps1</code>、<code>README_FIRST.txt</code>。</li>
+              <li>普通双击 <code>JavaCheck.bat</code>，不要“以管理员身份运行”。窗口会显示四步进度。</li>
+              <li>窗口提示完成后，回到本页第 2 步按 Ctrl+V；也可拖入同目录的 <code>result.txt</code>。</li>
+            </ol>
+            <p class="small">如果数量不对，说明可能被安全软件删除了文件。请到安全软件的隔离区/恢复区找回并按其界面添加为信任项；不要关闭安全软件或设置全局排除。</p>
+          </aside>
+        </div>
+        <details class="security-help">
+          <summary>被安全软件或 SmartScreen 拦截怎么办？</summary>
+          <ol>
+            <li>确认 ZIP 来自本页面或项目公开 Release，而不是聊天群里的未知转发文件。</li>
+            <li>右键下载的 ZIP → 属性 → “解除锁定”（若该项存在）→ 应用，再解压。</li>
+            <li>若被隔离，到安全软件的隔离区恢复这个具体文件；学校机房请联系管理员处理。</li>
+          </ol>
+          <p>本工具不下载或执行远程内容。检测脚本为可阅读的 PowerShell 文件；不建议关闭防护或添加全局排除。</p>
+        </details>
+
+        <details class="manual-check">
+          <summary>下载被拦截？使用免下载检查（只查 Java）</summary>
+          <p><strong>这是简化检查，只覆盖 Java 环境。学生认证仍需运行完整检测脚本，或按下面的三步手动确认。</strong></p>
+          <p>点击复制后，按 Win+X 打开 Windows PowerShell，粘贴运行；再把完整输出复制到第 2 步。若没有找到 <code>javac.exe</code>，会明确提示需要安装完整 JDK。</p>
+          <button id="manual-copy">复制 Java 简化检查命令</button>
+          <p class="small">此命令不读取 IDEA、Toolbox 或邮箱证据，因此不会给出任何“认证正常”结论。</p>
+        </details>
+      </div>
+    </section>
+
+    <section class="step">
+      <span class="number" aria-hidden="true">2</span>
+      <div class="body">
+        <h2>粘贴检测结果</h2>
+        <p>支持完整 JSON、控制台原文、免下载检查输出，或直接拖入 <code>result.txt</code>。分析全部在当前浏览器完成。</p>
+        <label class="sr-only" for="input">检测结果</label>
+        <textarea id="input" rows="8" spellcheck="false" placeholder="在这里 Ctrl+V，或把 result.txt 拖到这里"></textarea>
+        <div class="actions">
+          <button id="analyze" class="primary">开始分析</button>
+          <label class="button" for="file">选择 result.txt</label>
+          <input id="file" type="file" accept=".txt,.json,text/plain,application/json">
+        </div>
+      </div>
+    </section>
+
+    <p id="notice" role="status" aria-live="polite"></p>
+
+    <section class="step">
+      <span class="number" aria-hidden="true">3</span>
+      <div class="body">
+        <div class="result-heading">
+          <h2>你现在的情况</h2>
+          <div class="actions"><button id="export" disabled>导出结果 txt</button><button id="clear">清空本机保存的邮箱</button></div>
+        </div>
+        <div class="summary">
+          <span id="overall" class="badge"></span>
+          <h3 id="summary">检测结论将显示在这里</h3>
+          <p id="meta" class="small">请先下载 ZIP、在 Windows 电脑上运行 JavaCheck.bat，再粘贴结果。</p>
+          <p id="manual-boundary" class="manual-boundary" hidden></p>
+          <button id="repair" class="primary" hidden>运行 ZIP 内的 JavaRepair.bat</button>
+        </div>
+        <details>
+          <summary>修复会做什么？</summary>
+          <p>有可用 JDK 时，修复只调整当前 Windows 账户的 JAVA_HOME 和用户 Path，不联网、不申请管理员权限。它会先在解压文件夹建立 <code>backup-时间戳</code> 目录，分别备份用户级和系统级 JAVA_HOME / Path；失败只回滚本次改过的值。</p>
+          <p>没有可用 JDK 时才可能请求管理员权限以安装 JDK。不会改 CLASSPATH、删除 jetbra/pojie、修改 IDEA 登录或许可证。修复成功后，请关闭窗口，普通双击 <code>JavaCheck.bat</code> 重新检测。</p>
+        </details>
+        <div id="cards"></div>
+        <aside id="confirmation" class="confirmation" hidden>
+          <h3>学生认证：最后仍要在 IDEA 里人工确认</h3>
+          <p>即使 EMAIL_EXACT 命中，也只证明「IDEA 里登录/绑定过这个教育邮箱」，不等于教育包已激活。</p>
+          <ol>
+            <li>进入管理订阅（Manage Subscriptions）。</li>
+            <li>若找不到教育包，点击 Refresh license list。</li>
+            <li>选择教育包，点击 Activate。</li>
+          </ol>
+          <p><a href="https://www.jetbrains.com/help/idea/register.html" target="_blank" rel="noopener noreferrer">官方激活说明</a> · <a href="https://www.jetbrains.com/idea/download/" target="_blank" rel="noopener noreferrer">IDEA 官方下载页</a>（装完 IDEA 后再回来做学生认证）</p>
+        </aside>
+      </div>
+    </section>
+
+    <section class="step recheck">
+      <span class="number" aria-hidden="true">4</span>
+      <div class="body">
+        <h2>需要修复时，按页面提示复检</h2>
+        <p>只有第 3 步明确显示需要修复时，才在刚才解压的文件夹中双击 <code>JavaRepair.bat</code>。修复结束后关闭窗口，再普通双击 <code>JavaCheck.bat</code>，把新的结果粘贴回来。</p>
+        <p>学校机房、离线电脑或管理员拒绝安装时，页面会给出手动安装 JDK 的下一步；不要把 JRE 目录当作 JDK 使用。</p>
+      </div>
+    </section>
+
+    <section class="help">
+      <h2>没有 JDK 或自动安装没有完成？</h2>
+      <ol class="manual-steps">
+        <li><strong>① 下载 JDK</strong><p>打开 <a href="https://adoptium.net/temurin/releases/?version=25" target="_blank" rel="noopener noreferrer">Adoptium 官方下载页</a>，选 Windows、JDK 25 和对应架构。无管理员权限时可选 ZIP。</p></li>
+        <li><strong>② 安装或解压</strong><p>运行安装包或将 ZIP 解压到可写目录。文件夹内必须同时有 <code>bin\java.exe</code> 和 <code>bin\javac.exe</code>。</p></li>
+        <li><strong>③ 回来复检</strong><p>普通双击 <code>JavaCheck.bat</code>，粘贴新结果。受控电脑请联系机房管理员，也可先在 IDEA 的 Project SDK 中选择解压的 JDK。</p></li>
+      </ol>
+    </section>
+  </main>
+  <footer>本地检测 · 离线分析 · 学生认证由本人确认 <a href="README.md">使用说明</a></footer>
+</body>
+</html>
