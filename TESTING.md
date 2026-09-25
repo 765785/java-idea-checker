@@ -75,7 +75,7 @@ smoke-bat 只可用于当前机器的只读采集。任何真实修复写入测�
 | PowerShell 兼容 | PS 3.0、5.1、7、ISE；代码页 936/65001 下中文和 clipboard 降级 | 未实测 |
 | 安全软件 | 浏览器提示、MotW 传递、360 隔离/恢复、多个引擎误报情况 | 未实测 |
 | 离线版 | 断网 file:// 双击，下载 ZIP、导入、分析、导出、无 crypto.subtle 降级 | 未实测 |
-| Pages / Release | Pages 入口和静态资源 HTTP 200；Release 固定资产的 SHA-256 与 README 表一致 | v1.0.0 历史基线已核对；本轮 v1.1.0 资产与 Pages 发布待本次提交后核对 |
+| Pages / Release | Pages 入口和静态资源 HTTP 200；Release 固定资产的 SHA-256 与 README 表一致 | 2026-09-25：v1.1.0 的 ZIP 与离线版已从 Release 下载并逐项核对 SHA-256；Pages 工作流 36081908856 成功，首页与 assets/app.js 均为 HTTP 200，后者已核对 schema 2、人证与白名单代码。 |
 
 任何一项“未实测”都不能因为设计符合规格而改成“通过”。特别是：Explorer 解压、360 检测、UAC、受控机房、普通 VM winget 安装、真实 GitHub Release 与 Pages 发布必须保留真实证据。
 
