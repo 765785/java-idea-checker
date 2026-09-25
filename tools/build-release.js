@@ -10,6 +10,7 @@ const checker = require('../assets/app.js');
 const root = path.resolve(__dirname, '..');
 const dist = path.join(root, 'dist');
 const archive = path.join(dist, 'JavaIDEA-checker.zip');
+const offline = path.join(dist, 'JavaIDEA自检工具-离线版.html');
 const sums = path.join(dist, 'SHA256SUMS.txt');
 
 function build() {
@@ -17,8 +18,13 @@ function build() {
   const hash = crypto.createHash('sha256').update(bytes).digest('hex');
   fs.mkdirSync(dist, { recursive: true });
   fs.writeFileSync(archive, bytes);
-  fs.writeFileSync(sums, hash + '  JavaIDEA-checker.zip\n', 'utf8');
-  return { archive, hash };
+  const lines = [hash + '  JavaIDEA-checker.zip'];
+  if (fs.existsSync(offline)) {
+    const offlineHash = crypto.createHash('sha256').update(fs.readFileSync(offline)).digest('hex');
+    lines.push(offlineHash + '  JavaIDEA-checker-offline.html');
+  }
+  fs.writeFileSync(sums, lines.join('\n') + '\n', 'utf8');
+  return { archive, hash, sums };
 }
 
 if (require.main === module) {
