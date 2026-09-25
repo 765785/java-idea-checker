@@ -15,11 +15,11 @@
 
 这些记录只证明当时的旧实现基线。N17、N18、N27、N28 将 BAT 封装和 ZIP 机制替换后，相关用例必须重新执行。
 
-## 第六轮自动化验收：已执行（2026-09-24，Windows 本机）
+## 第六轮与 B 区定稿自动化验收：已执行（2026-09-25，Windows 本机）
 
 执行命令：`node --test tests/*.test.js`、`node tools/build-offline.js`、`node tools/build-offline.js --check`、`node tests/smoke-bat.js`。
 
-结果：Node 22 / Windows PowerShell 5.1 下 29/29 自动化测试通过；离线分发一致性检查通过；真实冒烟在“中文 检测 smoke”目录中由 `JavaCheck.bat` 调用可读的 `JavaCheck.ps1`，生成 result.txt，未改动环境变量、未安装软件。下表明确保留尚未做的 GUI、真实 PS3 和安全软件验收。
+结果：Node 22 / Windows PowerShell 5.1 下 40/40 自动化测试通过；固定 ZIP 与离线分发一致性检查通过；真实冒烟在“中文 检测 smoke”目录中由 `JavaCheck.bat` 调用可读的 `JavaCheck.ps1`，生成 result.txt，未改动环境变量、未安装软件。B 区新增的机器证据、人证优先、隐私脱敏和 schema 2 用例均为自动化夹具，不代表已经在真实 JetBrains 登录数据上验证。下表明确保留尚未做的 GUI、真实 PS3 和安全软件验收。
 
 | 编号 | 需要的证据 | 状态 |
 | --- | --- | --- |
@@ -35,6 +35,12 @@
 | H10 | README_FIRST.txt 为 UTF-8 BOM + CRLF，中文正常，内容要求先检测、网页提示后才修复、检测非管理员 | 自动化通过 |
 | H11 | 中文 locale java/openjdk 版本文本可解析；javac 路径缺失固定 FAIL | 自动化通过 |
 | H12 | 页面全量静态文本无“下载一个文件”“再次下载检测 BAT”等旧流程；仅一个 ZIP 下载入口 | 自动化通过 |
+| I01 | 固定 ZIP 不烧录个人邮箱；多次生成及不同旧输入路径下字节与 SHA-256 一致，并与 `dist/JavaIDEA-checker.zip` 一致 | 自动化通过 |
+| I02 | 白名单仅由 app.js 提供，生成 JavaCheck.ps1 中同步注入 `$EduDomains` | 自动化通过 |
+| I03 | cmdkey 条目、XML 行、日志和导出报告中的完整邮箱均脱敏；无关文件中的其他邮箱不触发错误账号结论 | 自动化通过（夹具） |
+| I04 | 单独存在 JetBrains cmdkey 条目或疑似凭据库文件时为中可信；两者都没有时为需人工确认 | 自动化通过（夹具） |
+| I05 | 人证仅在 IDEA 已安装且有启动配置时可升档；本校人证优先于机器其他邮箱；双方为其他域名时提示换账号 | 自动化通过（夹具） |
+| I06 | schema 1 结果明确拒绝；B 区不产生教育包已激活的结论 | 自动化通过 |
 
 第五轮增量 G01–G18 也须随第六轮重新执行，尤其：
 
@@ -69,7 +75,7 @@ smoke-bat 只可用于当前机器的只读采集。任何真实修复写入测�
 | PowerShell 兼容 | PS 3.0、5.1、7、ISE；代码页 936/65001 下中文和 clipboard 降级 | 未实测 |
 | 安全软件 | 浏览器提示、MotW 传递、360 隔离/恢复、多个引擎误报情况 | 未实测 |
 | 离线版 | 断网 file:// 双击，下载 ZIP、导入、分析、导出、无 crypto.subtle 降级 | 未实测 |
-| Pages / Release | Pages 入口和静态资源 HTTP 200；Release 固定资产的 SHA-256 与 README 表一致 | 2026-09-25：fc444ec 工作流 build/deploy 成功；首页 HTTP 200 且含 ZIP 新流程；v1.0.0 的两个固定资产 SHA-256 已由 Release API 核对 |
+| Pages / Release | Pages 入口和静态资源 HTTP 200；Release 固定资产的 SHA-256 与 README 表一致 | v1.0.0 历史基线已核对；本轮 v1.1.0 资产与 Pages 发布待本次提交后核对 |
 
 任何一项“未实测”都不能因为设计符合规格而改成“通过”。特别是：Explorer 解压、360 检测、UAC、受控机房、普通 VM winget 安装、真实 GitHub Release 与 Pages 发布必须保留真实证据。
 

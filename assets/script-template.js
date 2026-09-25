@@ -123,40 +123,117 @@ function Runtime-Evidence($Settings,$WhereJavac) {
 function Compare-Path($A,$B) { if (!$A -or !$B) { return $null }; return $A -eq $B }
 `;
   const collector = String.raw`
-function Get-EmailEvidence([string]$Email) {
-  $roots=New-Object 'System.Collections.Generic.List[string]'
-  foreach ($base in @((Join-Path $env:APPDATA 'JetBrains'),$env:USERPROFILE)) {
-    try { if (Test-Path -LiteralPath $base) { foreach ($d in @(Get-ChildItem -LiteralPath $base -Directory -ErrorAction Stop | Where-Object { $_.Name -match '^\.?IntelliJIdea|^IdeaIC' })) { $roots.Add($d.FullName) } } } catch { Record-Issue 'email.roots' $_ }
+function Normalize-EduDomain([string]$Domain) {
+  if ([string]::IsNullOrWhiteSpace($Domain)) { return '' }
+  return $Domain.Trim().TrimEnd('.').ToLowerInvariant()
+}
+function Test-EduDomain([string]$Domain) {
+  $candidate=Normalize-EduDomain $Domain
+  foreach ($allowed in @($EduDomains)) { if ($candidate -eq (Normalize-EduDomain ([string]$allowed))) { return $true } }
+  return $false
+}
+function Get-EvidencePath([string]$ScanRoot,[string]$FullName) {
+  $relative=$FullName
+  try { if ($FullName.StartsWith($ScanRoot,[StringComparison]::OrdinalIgnoreCase)) { $relative=$FullName.Substring($ScanRoot.Length).TrimStart('\') } } catch {}
+  return Protect-Text (($ScanRoot.Split('\')[-1]+'\'+$relative).Trim('\'))
+}
+function Test-AccountEvidencePath([string]$RelativePath) {
+  return $RelativePath -match '(?i)(account|licen|subscription|permanent)|(^|\\)options\\other\.xml$'
+}
+function Add-EmailEvidence($Map,[string]$Email,[string]$RelativePath,[string]$Kind,[bool]$AccountRelated) {
+  $key=$Email.Trim().ToLowerInvariant().TrimEnd('.')
+  if (!$key) { return }
+  if (!$Map.ContainsKey($key)) {
+    $Map[$key]=[pscustomobject]@{kind=$Kind;email=(Protect-Text $Email);paths=@($RelativePath);accountRelated=$AccountRelated}
+    return
   }
-  $toolbox=Join-Path $env:LOCALAPPDATA 'JetBrains\Toolbox'; if (Test-Path -LiteralPath $toolbox) { $roots.Add($toolbox) }
-  $evidence=New-Object 'System.Collections.Generic.List[object]'; $seen=@{}; $count=0; $truncated=$false; $exact=$false; $domainHit=$false; $other=$false
-  $domain=''; if ($Email -match '@(.+)$') { $domain=$Matches[1].ToLowerInvariant() }
+  $item=$Map[$key]
+  if ($Kind -eq 'WHITELIST_EMAIL') { $item.kind=$Kind }
+  $item.accountRelated=($item.accountRelated -or $AccountRelated)
+  if (@($item.paths).Count -lt 5 -and !(@($item.paths) -contains $RelativePath)) { $item.paths+=@($RelativePath) }
+}
+function Add-DomainEvidence($Map,[string]$Domain,[string]$RelativePath,[bool]$AccountRelated) {
+  $key=Normalize-EduDomain $Domain
+  if (!$key) { return }
+  if (!$Map.ContainsKey($key)) {
+    $Map[$key]=[pscustomobject]@{kind='DOMAIN_LITERAL';email=('***@'+$key);paths=@($RelativePath);accountRelated=$AccountRelated}
+    return
+  }
+  $item=$Map[$key]; $item.accountRelated=($item.accountRelated -or $AccountRelated)
+  if (@($item.paths).Count -lt 5 -and !(@($item.paths) -contains $RelativePath)) { $item.paths+=@($RelativePath) }
+}
+function Get-CredentialManagerEvidence {
+  $entries=New-Object 'System.Collections.Generic.List[string]'
+  $cmdkey=Join-Path $env:SystemRoot 'System32\cmdkey.exe'
+  if (!(Test-Path -LiteralPath $cmdkey)) { return [pscustomobject]@{status='UNKNOWN';entries=@();errors=@('cmdkey.exe 不可用')} }
+  $result=Invoke-Captured $cmdkey @('/list')
+  if ($result.exitCode -ne 0) {
+    $message=Protect-Text $result.output
+    if ($message.Length -gt 300) { $message=$message.Substring(0,300) }
+    return [pscustomobject]@{status='UNKNOWN';entries=@();errors=@($message)}
+  }
+  foreach ($line in @($result.output -split '\r?\n')) {
+    if ($line -notmatch '^\s*(?:Target|目标)\s*[:：]\s*(.+)$') { continue }
+    $name=$Matches[1].Trim()
+    if ($name -match '(?i)JetBrains|IntelliJ|Toolbox') { $entries.Add((Protect-Text $name)) }
+  }
+  return [pscustomobject]@{status='OK';entries=@($entries.ToArray() | Select-Object -Unique);errors=@()}
+}
+function Get-EmailEvidence {
+  $roots=New-Object 'System.Collections.Generic.List[string]'
+  $scanErrors=New-Object 'System.Collections.Generic.List[string]'
+  try {
+    $jetBrains=Join-Path $env:APPDATA 'JetBrains'
+    if (Test-Path -LiteralPath $jetBrains) { foreach ($d in @(Get-ChildItem -LiteralPath $jetBrains -Directory -ErrorAction Stop | Where-Object { $_.Name -match '^(IntelliJIdea|IdeaIC)' })) { $roots.Add($d.FullName) } }
+  } catch { $scanErrors.Add((Protect-Text ([string]$_))); Record-Issue 'email.roots' $_ }
+  try {
+    if (Test-Path -LiteralPath $env:USERPROFILE) { foreach ($d in @(Get-ChildItem -LiteralPath $env:USERPROFILE -Directory -ErrorAction Stop | Where-Object { $_.Name -match '^\.IntelliJIdea' })) { $config=Join-Path $d.FullName 'config'; if (Test-Path -LiteralPath $config) { $roots.Add($config) } } }
+  } catch { $scanErrors.Add((Protect-Text ([string]$_))); Record-Issue 'email.legacyRoots' $_ }
+  try { $toolbox=Join-Path $env:LOCALAPPDATA 'JetBrains\Toolbox'; if (Test-Path -LiteralPath $toolbox) { $roots.Add($toolbox) } } catch { $scanErrors.Add((Protect-Text ([string]$_))); Record-Issue 'email.toolboxRoot' $_ }
+
+  $emailMap=@{}; $domainMap=@{}; $xmlEvidence=New-Object 'System.Collections.Generic.List[object]'; $credentialFiles=New-Object 'System.Collections.Generic.List[string]'; $credentialFileSeen=@{}; $seen=@{}; $count=0; $truncated=$false; $unknown=$scanErrors.Count -gt 0
+  $domains=@($EduDomains | ForEach-Object { Normalize-EduDomain ([string]$_) } | Where-Object { $_ })
   foreach ($scanRoot in @($roots | Select-Object -Unique)) {
     $stack=New-Object 'System.Collections.Generic.Stack[string]'; $stack.Push($scanRoot)
     while ($stack.Count -gt 0) {
       $dir=$stack.Pop()
-      try { $items=@(Get-ChildItem -LiteralPath $dir -Force -ErrorAction Stop | Sort-Object @{Expression={ if ($_.Name -eq 'other.xml') {0} elseif ($_.Name -eq 'options') {1} else {2} }},Name) } catch { Record-Issue 'email.readDirectory' $_; continue }
+      try { $items=@(Get-ChildItem -LiteralPath $dir -Force -ErrorAction Stop | Sort-Object @{Expression={ if ($_.Name -eq 'other.xml') {0} elseif ($_.Name -eq 'options') {1} else {2} }},Name) } catch { $unknown=$true; $scanErrors.Add((Protect-Text ([string]$_))); Record-Issue 'email.readDirectory' $_; continue }
       foreach ($file in $items) {
         if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
-        if ($file.PSIsContainer) { if ($file.Name -notmatch '^(log|logs|cache|caches|index|tmp)$') { $stack.Push($file.FullName) }; continue }
-        if ($file.Extension -notmatch '^\.(xml|txt|json|properties)$' -or $file.Length -gt 5MB -or $seen.ContainsKey($file.FullName)) { continue }
+        if ($file.PSIsContainer) { if ($file.Name -notmatch '(?i)^(log|logs|cache|caches|index|tmp)$') { $stack.Push($file.FullName) }; continue }
+        $relative=Get-EvidencePath $scanRoot $file.FullName
+        if ($file.Name -match '(?i)(credential|kdbx|keychain|secure|store)') { if (!$credentialFileSeen.ContainsKey($relative)) { $credentialFileSeen[$relative]=$true; $credentialFiles.Add($relative) } }
+        if ($file.Extension -notmatch '(?i)^\.(xml|txt|json|properties)$' -or $file.Length -gt 5MB -or $seen.ContainsKey($file.FullName)) { continue }
         if ($count -ge 3000) { $truncated=$true; break }
         $seen[$file.FullName]=$true; $count++
-        try { $body=Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 -ErrorAction Stop } catch { Record-Issue 'email.readFile' $_; continue }
+        try { $body=Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 -ErrorAction Stop } catch { $unknown=$true; $scanErrors.Add((Protect-Text ([string]$_))); Record-Issue 'email.readFile' $_; continue }
         if ([string]::IsNullOrEmpty($body)) { continue }
+        $accountRelated=Test-AccountEvidencePath $relative
+        foreach ($domain in $domains) { if ($body -match ('(?i)(?<![\w.-])'+[regex]::Escape($domain)+'(?![\w.-])')) { Add-DomainEvidence $domainMap $domain $relative $accountRelated } }
         foreach ($match in [regex]::Matches([string]$body,'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}')) {
-          $tier='OTHER_EMAIL'; $other=$true
-          if ($Email -and $match.Value -ieq $Email) { $tier='EMAIL_EXACT'; $exact=$true } elseif ($domain -and $match.Value.Split('@')[-1] -ieq $domain) { $tier='DOMAIN_ONLY'; $domainHit=$true }
-          $evidence.Add([pscustomobject]@{ tier=$tier; file=($scanRoot.Split('\')[-1]+'\'+$file.FullName.Substring($scanRoot.Length).TrimStart('\')); email=(Protect-Text $match.Value) })
+          $email=[string]$match.Value; $domain=Normalize-EduDomain ($email.Split('@')[-1]); $kind=$(if (Test-EduDomain $domain) {'WHITELIST_EMAIL'} else {'OTHER_EMAIL'})
+          Add-EmailEvidence $emailMap $email $relative $kind $accountRelated
         }
-        if ($domain -and $body -match ('(?i)(?<![\w.-])'+[regex]::Escape($domain)+'(?![\w.-])')) { $domainHit=$true; if ($evidence.Count -eq 0) { $evidence.Add([pscustomobject]@{ tier='DOMAIN_ONLY';file=($scanRoot.Split('\')[-1]+'\'+$file.FullName.Substring($scanRoot.Length).TrimStart('\'));email=('***@'+$domain) }) } }
+        if ($file.Extension -ieq '.xml') {
+          foreach ($line in @($body -split '\r?\n')) {
+            if ($line -notmatch '(?i)(account|licen|email|mail|user|PermanentUserId|subscription)') { continue }
+            $snippet=Protect-Text $line.Trim(); if ($snippet.Length -gt 300) { $snippet=$snippet.Substring(0,300) }
+            if ($snippet -and $xmlEvidence.Count -lt 20) { $xmlEvidence.Add([pscustomobject]@{kind='XML_KEY_LINE';path=$relative;snippet=$snippet;accountRelated=$accountRelated}) }
+          }
+        }
       }
       if ($truncated) { break }
     }
     if ($truncated) { break }
   }
-  $tier='NOT_FOUND'; if ($Email) { if ($exact) {$tier='EMAIL_EXACT'} elseif ($domainHit) {$tier='DOMAIN_ONLY'} elseif ($other) {$tier='OTHER_EMAIL'} }
-  return [pscustomobject]@{ tier=$tier; target=(Protect-Text $Email); evidence=@($evidence | Sort-Object file,email -Unique); scanned=$count; truncated=$truncated }
+  $credentials=Get-CredentialManagerEvidence
+  $credentialEntries=@(); foreach ($entry in @($credentials.entries)) { $credentialEntries+=@(Protect-Text ([string]$entry)) }
+  $credentialErrors=@(); foreach ($entryError in @($credentials.errors)) { $credentialErrors+=@(Protect-Text ([string]$entryError)) }
+  $credentials=[pscustomobject]@{status=$credentials.status;entries=@($credentialEntries | Select-Object -Unique);errors=@($credentialErrors | Select-Object -Unique)}
+  if ($credentials.status -eq 'UNKNOWN') { $unknown=$true; foreach ($error in @($credentials.errors)) { $scanErrors.Add((Protect-Text $error)) } }
+  $domainList=New-Object 'System.Collections.Generic.List[object]'; foreach ($key in @($domainMap.Keys)) { $domainList.Add($domainMap[$key]) }
+  $emailList=New-Object 'System.Collections.Generic.List[object]'; foreach ($key in @($emailMap.Keys)) { $emailList.Add($emailMap[$key]) }
+  return [pscustomobject]@{status=$(if($unknown){'UNKNOWN'}else{'OK'});domains=@($domains);domainEvidence=@($domainList.ToArray());emailEvidence=@($emailList.ToArray());xmlEvidence=@($xmlEvidence.ToArray());credentialManager=$credentials;credentialFiles=@($credentialFiles.ToArray() | Select-Object -First 20);configPresent=(@($roots | Select-Object -Unique).Count -gt 0);scanned=$count;truncated=$truncated;errors=@($scanErrors.ToArray() | Select-Object -Unique)}
 }
 function Get-DirectoryEvidence {
   foreach ($dir in @((Join-Path $env:APPDATA 'JetBrains'),(Join-Path $env:LOCALAPPDATA 'JetBrains'),(Join-Path $env:USERPROFILE '.jdks'),(Join-Path $env:LOCALAPPDATA 'JetBrains\Toolbox'))) {
@@ -175,7 +252,7 @@ function Get-Idea {
 function Get-Trace {
   foreach ($scope in @('User','Machine')) { try { $all=[Environment]::GetEnvironmentVariables($scope); foreach ($name in $all.Keys) { if ($name -match 'jetbra|pojie|_VM_OPTIONS$') { [pscustomobject]@{scope=$scope;name=$name;matched=($name -match 'jetbra|pojie' -or [string]$all[$name] -match 'jetbra|pojie')} } } } catch { Record-Issue 'trace' $_ } }
 }
-function Collect-Result([string]$Email) {
+function Collect-Result {
   Write-Host '【1/4】正在检查 JAVA_HOME 和 Path...'
   $snapshot=Get-EnvironmentSnapshot; $effective=Get-EffectiveHome $snapshot
   $whereJava=@(Get-Where java); $whereJavac=@(Get-Where javac)
@@ -185,10 +262,10 @@ function Collect-Result([string]$Email) {
   $includes=$false; $rawPaths=@(); foreach ($value in @($snapshot.machine.Path.value,$snapshot.user.Path.value,$env:Path)) { foreach ($entry in ([string]$value -split ';')) { if ($entry -match 'java|jdk|jetbrains') { $rawPaths+=$entry }; $expanded=$entry -replace '(?i)%JAVA_HOME%',([string]$probe.path).Replace('$','$$'); if ($probe.path -and (Normalize-Directory $expanded) -eq ($probe.path+'\bin')) { $includes=$true } } }
   $diskUnavailable=$false; if ($effective -match '^([a-zA-Z]:)') { $diskUnavailable=!(Test-Path ($Matches[1]+'\')) }
   Write-Host '【3/4】正在检查 IDEA、Toolbox 与教育邮箱证据...'
-  $dirs=@(Invoke-Section 'directories' {Get-DirectoryEvidence} @()); $idea=Invoke-Section 'idea' {Get-Idea} ([pscustomobject]@{installations=@();error='采集失败'}); $emailScan=Invoke-Section 'emailScan' {Get-EmailEvidence $Email} ([pscustomobject]@{tier='NOT_FOUND';evidence=@();scanned=0;truncated=$true}); $trace=@(Invoke-Section 'trace' {Get-Trace} @())
+  $dirs=@(Invoke-Section 'directories' {Get-DirectoryEvidence} @()); $idea=Invoke-Section 'idea' {Get-Idea} ([pscustomobject]@{installations=@();error='采集失败'}); $emailScan=Invoke-Section 'emailScan' {Get-EmailEvidence} ([pscustomobject]@{status='UNKNOWN';domains=@($EduDomains);domainEvidence=@();emailEvidence=@();xmlEvidence=@();credentialManager=@{status='UNKNOWN';entries=@();errors=@('教育邮箱证据采集失败')};credentialFiles=@();configPresent=$false;scanned=0;truncated=$true;errors=@('教育邮箱证据采集失败')}); $trace=@(Invoke-Section 'trace' {Get-Trace} @())
   $class=@((Read-EnvironmentValue User CLASSPATH).value,(Read-EnvironmentValue Machine CLASSPATH).value) -join ';'
   $username=[Environment]::UserName; if ($username.Length) { $username=$username.Substring(0,1)+'***' }
-  return [pscustomobject]@{ schemaVersion=1; meta=@{scriptVersion='1.0.0';collectedAt=[DateTime]::UtcNow.ToString('o');windows=[Environment]::OSVersion.VersionString;user=$username;powershell=$PSVersionTable.PSVersion.ToString()}; env=@{user=$snapshot.user;machine=$snapshot.machine;effectiveJavaHome=$effective;classpath=$class;path=($rawPaths -join ';')}; exec=@{java=$j;javac=$c;settings=$settings}; javaProbe=@{home=$probe;candidates=$candidates;whereJava=$whereJava;whereJavac=$whereJavac;runtimeHome=$evidence.runtime;runtimeMatchesHome=(Compare-Path $evidence.runtime $probe.path);compilerMatchesHome=(Compare-Path $evidence.compiler $probe.path);runtimeMajor=(Get-Major $j.output);compilerMajor=(Get-Major $c.output);forwarders=@(@($whereJava+$whereJavac) | Where-Object { Is-Forwarder $_ } | Select-Object -Unique);pathIncludesHome=$includes;diskUnavailable=$diskUnavailable;jreBinExists=($probe.path -and (Test-Path -LiteralPath ($probe.path+'\jre\bin')));archWarning=$(if ($settings.output -match '(?m)^\s*os.arch\s*=\s*(x86|i386)\s*$' -and [Environment]::Is64BitOperatingSystem) {'当前 Java 为 32 位，Windows 为 64 位'} else {$null})}; idea=$idea;jetbrainsDirs=$dirs;jetbraTrace=$trace;emailScan=$emailScan;errors=@() }
+  return [pscustomobject]@{ schemaVersion=2; meta=@{scriptVersion='2.0.0';collectedAt=[DateTime]::UtcNow.ToString('o');windows=[Environment]::OSVersion.VersionString;user=$username;powershell=$PSVersionTable.PSVersion.ToString()}; env=@{user=$snapshot.user;machine=$snapshot.machine;effectiveJavaHome=$effective;classpath=$class;path=($rawPaths -join ';')}; exec=@{java=$j;javac=$c;settings=$settings}; javaProbe=@{home=$probe;candidates=$candidates;whereJava=$whereJava;whereJavac=$whereJavac;runtimeHome=$evidence.runtime;runtimeMatchesHome=(Compare-Path $evidence.runtime $probe.path);compilerMatchesHome=(Compare-Path $evidence.compiler $probe.path);runtimeMajor=(Get-Major $j.output);compilerMajor=(Get-Major $c.output);forwarders=@(@($whereJava+$whereJavac) | Where-Object { Is-Forwarder $_ } | Select-Object -Unique);pathIncludesHome=$includes;diskUnavailable=$diskUnavailable;jreBinExists=($probe.path -and (Test-Path -LiteralPath ($probe.path+'\jre\bin')));archWarning=$(if ($settings.output -match '(?m)^\s*os.arch\s*=\s*(x86|i386)\s*$' -and [Environment]::Is64BitOperatingSystem) {'当前 Java 为 32 位，Windows 为 64 位'} else {$null})}; idea=$idea;jetbrainsDirs=$dirs;jetbraTrace=$trace;emailScan=$emailScan;errors=@() }
 }
 function Convert-SafeJson($Data) {
   # Never export unfiltered raw Path values from the registry snapshots.
@@ -356,13 +433,13 @@ try { $Host.UI.RawUI.WindowTitle='Java 环境自检工具' } catch {}
   function buildRepairBat() {
     return '@echo off & title Java Environment Checker\r\nif not exist "%~dp0JavaCheck.ps1" (powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0JavaRepair.ps1" -MissingChecker) else powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0JavaRepair.ps1"\r\npause\r\n';
   }
-  function buildCheckerPs1(email = '') {
-    const literal = String(email).replace(/'/g, "''");
-    return '\uFEFF' + scriptHeader + "\r\nparam([string]$EduEmail = '" + literal + "', [string]$OutputDirectory)\r\n" + scriptBootstrap + common + collector + String.raw`
+  function buildCheckerPs1(domains) {
+    const normalized = Array.from(new Set((Array.isArray(domains) ? domains : []).map(domain => String(domain || '').trim().replace(/\.+$/, '').toLowerCase()).filter(Boolean)));
+    const domainArray = normalized.map(domain => "'" + domain.replace(/'/g, "''") + "'").join(',');
+    return '\uFEFF' + scriptHeader + "\r\nparam([string]$OutputDirectory)\r\n$EduDomains=@(" + domainArray + ")\r\n" + scriptBootstrap + common + collector + String.raw`
 try {
   if (!$OutputDirectory) { $OutputDirectory=$PSScriptRoot }
-  if (!$EduEmail) { $EduEmail=Read-Host '请输入教育邮箱（可留空）' }
-  $data=Collect-Result $EduEmail
+  $data=Collect-Result
   Save-Result $data $OutputDirectory
 } catch {
   Record-Issue 'collector.final' $_

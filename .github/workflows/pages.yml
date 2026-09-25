@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Test
         run: node --test tests/*.test.js
+      - name: Build fixed Release ZIP
+        run: node tools/build-release.js
       - name: Build offline distribution
         run: node tools/build-offline.js
       - name: Verify offline distribution

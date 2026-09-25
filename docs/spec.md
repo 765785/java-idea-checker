@@ -6,7 +6,7 @@
 
 仅支持 Windows 桌面端。页面本身可在 file:// 与 GitHub Pages 打开；不依赖后端、CDN、第三方库、远程字体、遥测或网络请求。桌面优先；疑似非 Windows 或窄屏时显示劝返提示，但不隐藏下载入口。
 
-规则优先级为：第六轮 N27–N31 / Q19–Q22 优先于第五轮同主题表述；第五轮 N17–N26 / Q10–Q18 优先于前四轮；未被明确作废的早期规则继续有效。第六轮不改变“ZIP 唯一下载入口、四脚本结构、免下载 A/B、离线 HTML、杀软折叠区、教育邮箱防呆、四步流程、PowerShell 版本 guard”的第五轮决策。
+规则优先级为：N38–N42 / Q27–Q28 优先于 N32–N37 / Q23–Q26；后者优先于第六轮 N27–N31 / Q19–Q22；未被明确作废的早期规则继续有效。第七轮不改变 ZIP 唯一下载入口、四脚本结构、免下载 A/B、离线 HTML、杀软折叠区、四步流程和 PowerShell 版本 guard。
 
 明确作废项：
 
@@ -22,7 +22,7 @@
 | ZIP 条目 | 格式与用途 |
 | --- | --- |
 | JavaCheck.bat | 纯 ASCII 启动器；只设置英文标题、用 %~dp0 调用同级 JavaCheck.ps1、pause |
-| JavaCheck.ps1 | UTF-8 BOM 可读采集脚本；生成时烧录教育邮箱默认值 |
+| JavaCheck.ps1 | UTF-8 BOM 可读采集脚本；由网页注入唯一域名白名单，不含个人邮箱 |
 | JavaRepair.bat | 纯 ASCII 启动器；用 %~dp0 调用 JavaRepair.ps1，缺少 JavaCheck.ps1 时传入 MissingChecker |
 | JavaRepair.ps1 | UTF-8 BOM 可读修复脚本；通用逻辑，不接受网页报告中的命令或路径 |
 | README_FIRST.txt | UTF-8 BOM + CRLF 中文说明：先检测、仅网页提示时修复、检测不以管理员运行、拦截时回网页说明 |
@@ -33,12 +33,12 @@ ZIP writer 的每个条目必须使用 UTF-8 flag 0x0800、正斜杠路径、Sto
 
 标准流程：
 
-1. 在目标 Windows 电脑填写教育邮箱，下载 JavaIDEA自检工具.zip。
+1. 在目标 Windows 电脑下载固定的 JavaIDEA自检工具.zip；下载前不填写或保存个人邮箱。
 2. 右键 ZIP 属性解除锁定后解压，确认 4 个脚本 + 1 个说明 txt 齐全，普通双击 JavaCheck.bat。
 3. 回网页第 2 步 Ctrl+V 粘贴 JSON，或拖入 result.txt；浏览器仅将导入内容作为纯文本数据处理。
 4. 仅 A 区存在真实 FAIL 时，在同一文件夹运行 JavaRepair.bat；关闭当前黑色窗口后重新双击 JavaCheck.bat 复检。
 
-检测 JSON 的 schemaVersion 为 1，含 meta、env、exec、javaProbe、idea、jetbrainsDirs、jetbraTrace、emailScan、errors 等字段。页面限长、提取 JSON、验证结构；超过 30 分钟提示结果陈旧，旧 schema 或截断/乱码给具体中文原因。路径在本机完成比较、再替换用户目录前缀；邮箱输出首字符***@域名；网页只用 textContent 纯文本渲染。邮箱只存当前浏览器 localStorage，不上传。
+检测 JSON 的 schemaVersion 为 2，含 meta、env、exec、javaProbe、idea、jetbrainsDirs、jetbraTrace、emailScan、errors 等字段。页面拒绝旧 schema；超过 30 分钟提示结果陈旧，截断/乱码给具体中文原因。路径在本机完成比较、再替换用户目录前缀；所有邮箱输出首字符***@域名；网页只用 textContent 纯文本渲染。下载过程不保存邮箱；人证邮箱只在当前页面内存中使用。
 
 检测脚本将报告写入脚本同目录 result.txt，尝试写入剪贴板，且逐节显示：
 
@@ -81,13 +81,17 @@ PS1 首先判断 Windows 与 PowerShell 版本。非 Windows 或低于 PowerShel
 - 始终禁止 Invoke-Expression、iex、DownloadString、动态拼接命令、变量名随机化、字符串反转和其他混淆。
 - 外部命令通过统一捕获函数执行：合并 stderr、保留退出码、尝试设置并 finally 恢复编码；编码设置失败只记 errors。
 
-B 区只允许一条固定链：IDEA 安装/版本 → JetBrains/Toolbox 配置目录 → EMAIL_EXACT、DOMAIN_ONLY、OTHER_EMAIL、NOT_FOUND 四档邮箱证据 → Manage Subscriptions → Refresh license list → Activate。未安装或未启动是 MANUAL，不影响 A 区。所有档位均不得说认证成功或教育包已激活。扫描新版、旧版与 Toolbox，跳过缓存/日志/重解析点，限制扩展名、单文件 5MB、总文件 3000；证据统一脱敏。
+B 区固定链：IDEA 安装/版本 → JetBrains/Toolbox 配置目录 → 机器证据 → IDEA 当前账户人证 → 学生确认勾选 → Manage Subscriptions → Refresh license list → Activate。学校域名白名单的唯一真源是 app.js 中 EDU_DOMAIN_WHITELIST；工具包生成时注入 JavaCheck.ps1 的 EduDomains 数组，脚本中不保留第二份硬编码，也不接收个人邮箱。
+
+机器证据扫描新版、旧版与 Toolbox，跳过缓存/日志/重解析点，限制扩展名、单文件 5MB、总文件 3000。每个允许文本文件同时匹配白名单域名字面量、完整邮箱和 XML 账户关键行；账户/许可证文件与 options/other.xml 中的其他域名才可触发机器侧明显不符，无关文件中的其他邮箱仅作参考。cmdkey 只记录 JetBrains/IntelliJ/Toolbox 条目名，凭据库仅记录 credential/kdbx/keychain/secure/store 类文件名，绝不读取密码或凭据内容。条目、片段、日志和报告共用统一脱敏。
+
+最终四档为：人证白名单域名或机器命中白名单域名是高可信；凭据管理器条目或凭据库文件是中可信；只有目录、无证据或 UNKNOWN 是需人工确认；有效人证为其他域名，或仅账户/许可证主文件存在其他域名且无高可信证据，是明显不符。人证仅在 IDEA 已安装且存在配置目录时参与升档；与机器冲突时以人证为准。未安装或未启动 IDEA 是 MANUAL，不影响 A 区。任何档位均不得说认证成功或教育包已激活。
 
 免下载路径 A 只采集 JAVA_HOME、java/javac 版本及 javac 路径。纯文本解析兼容 java version、openjdk version、java 版本、openjdk 版本及 JDK 9+ 单行版本；javac 路径为空必为 FAIL，并给具体中文原因。路径 A 结果固定说明“这是简化检查，只覆盖 Java 环境。学生认证仍需运行完整检测脚本，或按下面的三步手动确认。”B 区固定 MANUAL，直接显示三步人工确认，不显示邮箱命中或认证正常。路径 B 仅提供图文手工配置步骤。
 
 ## 规则索引
 
-验收编号 S01–S35 是机器场景；F01–F07 是第四轮专项；G01–G18 为第五轮自动/人工验收；H01–H12 为第六轮追加验收。T 表示自动契约，V 表示真实 Windows、VM 或人工验收。第二轮没有独立原文；N1–N5、P1–P6 仅登记对话明确引用的含义，不补造缺失规则。
+验收编号 S01–S35 是机器场景；F01–F07 是第四轮专项；G01–G18 为第五轮自动/人工验收；H01–H12 为第六轮追加验收；I01–I12 为 B 区定稿验收。T 表示自动契约，V 表示真实 Windows、VM 或人工验收。第二轮没有独立原文；N1–N5、P1–P6 仅登记对话明确引用的含义，不补造缺失规则。
 
 | 编号 | 一句话结论 | 验收 |
 | --- | --- | --- |
@@ -161,6 +165,23 @@ B 区只允许一条固定链：IDEA 安装/版本 → JetBrains/Toolbox 配置�
 | Q20 | 页面提示解压后核对 4 脚本 + 1 txt | 文案走查 |
 | Q21 | 路径 A 兼容中文 locale；javac 缺失为 FAIL | H11 |
 | Q22 | 全站只保留唯一 ZIP 下载入口，清除旧 BAT 文案 | H12 |
+| N32 | 学生认证主轴是白名单域名与多源机器证据，下载前邮箱不参与判定 | I01–I04、T |
+| N33 | 域名字面量、完整邮箱、XML 账户关键行并行扫描 | I02、T/V |
+| N34 | 扫描 cmdkey 条目、账户文件和 XML 关键属性，不读取密码 | I03、T/V |
+| N35 | IDEA 当前账户人证为最高优先级证据，勾选只作记录 | I05、I08、T |
+| N36 | B 区仅输出高可信、中可信、需人工确认、明显不符，永不输出激活成功 | I04–I10、T |
+| N37 | 归一化 plus addressing/大小写/尾点，UNKNOWN 不伪装成未找到 | I01、I07、T |
+| Q23 | 页面给出 Manage Subscriptions 与当前账户邮箱位置引导 | 文案走查 |
+| Q24 | 导出报告单列学生认证机器证据、人证和确认记录 | I03、I05、T |
+| Q25 | README 说明证据准确率边界与不能自动确认的原因 | 文档 |
+| Q26 | EDU_DOMAIN_WHITELIST 是换校时的唯一配置入口 | I02、T |
+| N38 | ZIP 不含个人邮箱且使用固定时间戳，网页与 Release 哈希可一一核对 | I11、T/V |
+| N39 | app.js 白名单唯一真源并注入生成的 JavaCheck.ps1 | I02、T |
+| N40 | 凭据条目、XML 片段、JSON、日志和报告全部统一脱敏 | I03、I12、T |
+| N41 | 其他域名仅在账户/许可证主文件中才可能触发明显不符 | I04、T |
+| N42 | cmdkey 条目或疑似凭据库文件任一存在即可构成中可信 | I06、T |
+| Q27 | 未安装或未启动 IDEA 时人证给引导且不参与升档 | I08、T |
+| Q28 | 人证优先于机器冲突证据，并显示脱敏冲突提示 | I09–I10、T |
 
 ## 35 场景验收矩阵
 
@@ -245,6 +266,18 @@ B 区只允许一条固定链：IDEA 安装/版本 → JetBrains/Toolbox 配置�
 | H10 | README_FIRST.txt 存在、中文正常、先检测后修复 |
 | H11 | 中文 locale 版本解析正确；javac 缺失为 FAIL |
 | H12 | 页面无“下载一个文件/再次下载 BAT”等旧文案，唯一 ZIP 入口 |
+| I01 | 域名归一化覆盖大小写、空格、plus addressing 与尾点 |
+| I02 | 白名单修改后 JavaCheck.ps1 注入域名同步变化 |
+| I03 | cmdkey、XML、日志、JSON 与报告没有完整邮箱 |
+| I04 | 无关 QQ 邮箱不能覆盖账户文件本校域名高可信 |
+| I05 | 有效 IDEA 人证为本校域名即高可信，勾选只记录 |
+| I06 | cmdkey 或凭据库文件任一存在为中可信 |
+| I07 | 采集异常为 UNKNOWN，不伪装为未发现 |
+| I08 | 未安装或未启动 IDEA 时人证不升档且给引导 |
+| I09 | 本校人证优先于机器其他邮箱并显示冲突提示 |
+| I10 | 人证与账户机器证据均为其他域名时明显不符 |
+| I11 | 多次生成固定 ZIP 的 SHA-256 一致且与 Release 一致 |
+| I12 | schema 1 被拒绝，schema 2 可解析 |
 
 ## 安全、离线与发布约束
 
@@ -256,4 +289,4 @@ B 区只允许一条固定链：IDEA 安装/版本 → JetBrains/Toolbox 配置�
 
 该消息须附 Release 链接，不能显示 undefined、空白或异常。离线哈希不可用不阻止下载 ZIP。
 
-固定发布资产通过 GitHub Release 提供，并公布文件、SHA-256、版本、日期。网页生成的外层名保持 JavaIDEA自检工具.zip，且哈希因教育邮箱而不同；固定 Release 可使用 ASCII 别名，不能把任意生成 ZIP 的哈希冒充固定发行哈希。Pages 工作流在发布前运行自动测试并发布 dist；真实 Explorer 解压、杀软多引擎、普通 VM winget 安装、UAC/跨账户、受控机房与公开 Release/Pages 状态必须按 TESTING.md 如实标记，不能用 mock、Sandbox 或未执行的计划宣布通过。
+固定发布资产通过 GitHub Release 提供，并公布文件、SHA-256、版本、日期。网页生成的外层名保持 JavaIDEA自检工具.zip，内容与固定 Release ZIP 字节一致，因此哈希可直接核对；Release 可使用 ASCII 别名以避免上传链路文件名编码差异。Pages 工作流在发布前运行自动测试并发布 dist；真实 Explorer 解压、杀软多引擎、普通 VM winget 安装、UAC/跨账户、受控机房与公开 Release/Pages 状态必须按 TESTING.md 如实标记，不能用 mock、Sandbox 或未执行的计划宣布通过。

@@ -38,8 +38,8 @@ function withBom(text) {
   return content.subarray(0, 3).equals(UTF8_BOM) ? content : Buffer.concat([UTF8_BOM, content]);
 }
 
-function makeEntries(email = 'li@school.edu.cn') {
-  const entries = need(Checker, 'packageEntries')(email);
+function makeEntries(domains) {
+  const entries = need(Checker, 'packageEntries')(domains);
   assert.ok(Array.isArray(entries), 'packageEntries() 必须返回 ZIP 条目数组');
   return entries.map(entry => ({ name: entry.name, data: Buffer.from(entry.data) }));
 }
@@ -149,7 +149,7 @@ function powershellAstCommandNames(scriptText) {
 test('N27: BAT 纯 ASCII、无 Base64，并只通过同目录 ASCII 文件名调用 PS1', () => {
   const checkerBat = need(Templates, 'buildCheckerBat')();
   const repairBat = need(Templates, 'buildRepairBat')();
-  const checkerPs1 = need(Templates, 'buildCheckerPs1')('li@school.edu.cn');
+  const checkerPs1 = need(Templates, 'buildCheckerPs1')(Checker.EDU_DOMAIN_WHITELIST);
   const repairPs1 = need(Templates, 'buildRepairPs1')();
   for (const [name, bat] of [['JavaCheck.bat', checkerBat], ['JavaRepair.bat', repairBat]]) {
     assert.doesNotMatch(bat, /[^\x00-\x7f]/, `${name} 不能包含中文或其他非 ASCII 字符`);
@@ -284,7 +284,7 @@ test('Q21: 免下载路径缺少 javac.exe 必须是专项 FAIL，并给出具�
 });
 
 test('N31: PowerShell 3 兼容静态契约禁止高风险/高版本未降级语法', { skip: process.platform !== 'win32' }, () => {
-  const scripts = [need(Templates, 'buildCheckerPs1')('li@school.edu.cn'), need(Templates, 'buildRepairPs1')()];
+  const scripts = [need(Templates, 'buildCheckerPs1')(Checker.EDU_DOMAIN_WHITELIST), need(Templates, 'buildRepairPs1')()];
   for (const script of scripts) {
     const commands = powershellAstCommandNames(script).map(command => command.toLowerCase());
     for (const forbidden of ['invoke-expression', 'iex', 'downloadstring', 'get-filehash']) assert.equal(commands.includes(forbidden), false, `禁止命令仍出现：${forbidden}`);
@@ -304,19 +304,19 @@ test('N31: 模拟没有剪贴板 cmdlet 的环境仍将 result.txt 落盘', { sk
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'java-check-ps3-'));
   try {
     const checker = path.join(directory, 'JavaCheck.ps1');
-    fs.writeFileSync(checker, withBom(need(Templates, 'buildCheckerPs1')('')));
+    fs.writeFileSync(checker, withBom(need(Templates, 'buildCheckerPs1')(Checker.EDU_DOMAIN_WHITELIST)));
     // Force the fallback path to fail quickly without touching the real clipboard.
     // A copied cmd.exe can consume JSON as batch input and hang on hosted runners.
     fs.copyFileSync(path.join(process.env.SystemRoot, 'System32', 'where.exe'), path.join(directory, 'clip.exe'));
     const escapedChecker = checker.replace(/'/g, "''");
     const escapedDirectory = directory.replace(/'/g, "''");
-    const command = "$original=Microsoft.PowerShell.Core\\Get-Command;function Get-Command {param([Parameter(Position=0)]$Name,[Parameter(ValueFromRemainingArguments=$true)]$Rest) if([string]$Name -match '^(Set|Get)-Clipboard$'){return $null}; & $original $Name @Rest};$env:Path='" + escapedDirectory.replace(/'/g, "''") + ";'+$env:Path;& '" + escapedChecker + "' -EduEmail '' -OutputDirectory '" + escapedDirectory + "'";
+    const command = "$original=Microsoft.PowerShell.Core\\Get-Command;function Get-Command {param([Parameter(Position=0)]$Name,[Parameter(ValueFromRemainingArguments=$true)]$Rest) if([string]$Name -match '^(Set|Get)-Clipboard$'){return $null}; & $original $Name @Rest};$env:Path='" + escapedDirectory.replace(/'/g, "''") + ";'+$env:Path;& '" + escapedChecker + "' -OutputDirectory '" + escapedDirectory + "'";
     const result = cp.spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr + (result.error || ''));
     const report = path.join(directory, 'result.txt');
     assert.ok(fs.existsSync(report), '没有剪贴板 cmdlet 时仍必须写入 result.txt');
     const json = JSON.parse(fs.readFileSync(report, 'utf8').replace(/^\uFEFF/, ''));
-    assert.equal(json.schemaVersion, 1);
+    assert.equal(json.schemaVersion, 2);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

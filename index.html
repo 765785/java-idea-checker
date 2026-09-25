@@ -31,10 +31,8 @@
         <p>适用于 Windows 7 SP1 / 8.1 / 10 / 11 的桌面电脑。下载一个压缩包，解压后双击检测脚本；检测只采集信息，不会安装软件或修改环境变量。</p>
         <div class="columns">
           <div>
-            <label for="email">教育邮箱（可留空）</label>
-            <input id="email" type="email" placeholder="例如 li@school.edu.cn" autocomplete="off" maxlength="254">
-            <p id="email-hint" class="small"></p>
-            <p class="small">邮箱只保存在这个浏览器的 localStorage，并烧录到你自己生成的检测脚本中；网页不会上传它。请勿把 ZIP 转发给他人。</p>
+            <p>此 ZIP 不包含个人邮箱，所有学生下载到的文件完全一致，可与公开 SHA-256 核对。教育邮箱判定会在检测结果出来后，由机器证据和 IDEA 当前账户人证共同完成。</p>
+            <p class="small">脚本和网页不会上传任何数据；请不要把 result.txt、备份文件或导出报告公开转发。</p>
             <button id="generate" class="primary">生成并下载 JavaIDEA自检工具.zip</button>
             <p id="hash-status" class="small" aria-live="polite"></p>
             <p class="small">如需核验下载文件，可在 <a id="release-link" href="https://github.com/765785/java-idea-checker/releases" target="_blank" rel="noopener noreferrer">GitHub Release 页面</a>查看公开 SHA-256。</p>
@@ -92,7 +90,7 @@
       <div class="body">
         <div class="result-heading">
           <h2>你现在的情况</h2>
-          <div class="actions"><button id="export" disabled>导出结果 txt</button><button id="clear">清空本机保存的邮箱</button></div>
+          <div class="actions"><button id="export" disabled>导出结果 txt</button><button id="clear">清空本页人证输入</button></div>
         </div>
         <div class="summary">
           <span id="overall" class="badge"></span>
@@ -109,12 +107,25 @@
         <div id="cards"></div>
         <aside id="confirmation" class="confirmation" hidden>
           <h3>学生认证：最后仍要在 IDEA 里人工确认</h3>
-          <p>即使 EMAIL_EXACT 命中，也只证明「IDEA 里登录/绑定过这个教育邮箱」，不等于教育包已激活。</p>
+          <p>机器扫描只能提供辅助证据。请把 IDEA 当前实际显示的账户邮箱作为人证；它仍不等于教育包已经激活。</p>
+          <div class="witness">
+            <h4>人证：复制 IDEA 当前登录的账户邮箱</h4>
+            <ol>
+              <li>打开 IDEA，点击右上角账户头像；也可使用 <code>Help | Register</code>。</li>
+              <li>打开 <strong>Manage Subscriptions</strong>（管理订阅）。</li>
+              <li>复制左下角显示的当前账户邮箱，粘贴到下面。</li>
+            </ol>
+            <label for="idea-account-email">当前 IDEA 登录账户邮箱</label>
+            <input id="idea-account-email" type="email" placeholder="你的名字@dnui.edu.cn" autocomplete="off" maxlength="254">
+            <label class="check"><input id="idea-account-confirmed" type="checkbox"> 我确认这是 IDEA 当前显示的登录账户</label>
+            <p class="small">“@”前是你自己的邮箱名，每人不同。本页不会保存或上传人证邮箱，展示和导出时会自动脱敏。</p>
+          </div>
           <ol>
             <li>进入管理订阅（Manage Subscriptions）。</li>
             <li>若找不到教育包，点击 Refresh license list。</li>
             <li>选择教育包，点击 Activate。</li>
           </ol>
+          <p><strong>以上只能证明 IDEA 登录的是哪个邮箱。教育包是否真的激活，必须在 Manage Subscriptions 里看到教育包并点击 Activate 才算数。</strong></p>
           <p><a href="https://www.jetbrains.com/help/idea/register.html" target="_blank" rel="noopener noreferrer">官方激活说明</a> · <a href="https://www.jetbrains.com/idea/download/" target="_blank" rel="noopener noreferrer">IDEA 官方下载页</a>（装完 IDEA 后再回来做学生认证）</p>
         </aside>
       </div>
