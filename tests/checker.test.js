@@ -28,14 +28,14 @@ function bFixture() {
   data.emailScan.configPresent = true;
   return data;
 }
-function studentCard(result) { return result.cards.find(item => item.name === '学生认证结论'); }
+function studentCard(result) { return result.cards.find(item => item.name === '最终动作'); }
 function hash(bytes) { return crypto.createHash('sha256').update(Buffer.from(bytes)).digest('hex'); }
 
 test('normal machine and missing IDEA do not create Java failure', () => {
   const result = app.analyze(fixture());
   assert.notEqual(result.status, 'FAIL');
   assert.equal(result.repair, false);
-  assert.equal(result.cards.find(item => item.name === 'IDEA 安装与版本').status, 'MANUAL');
+  assert.equal(result.cards.find(item => item.name === '机器认证证据').status, 'MANUAL');
 });
 test('new machine needs JDK', () => {
   const data = fixture(); data.javaProbe.candidates = []; data.javaProbe.home = { valid: false }; data.exec = {};
@@ -114,7 +114,7 @@ test('N35/Q28: eligible DNUI witness is high confidence and wins conflicts', () 
   const result = app.analyze(data, { email: 'Student+course@DNUI.edu.cn.', confirmed: true });
   assert.equal(result.student.tier, 'HIGH');
   assert.equal(result.student.witnessMasked, 's***@dnui.edu.cn');
-  assert.match(studentCard(result).advice, /不同的邮箱/);
+  assert.match(studentCard(result).advice, /不同的脱敏邮箱/);
 });
 test('N36/Q28: both witness and account evidence at other domains are mismatch', () => {
   const data = bFixture();
@@ -127,6 +127,95 @@ test('student evidence never claims activation', () => {
   const card = studentCard(app.analyze(fixture()));
   assert.doesNotMatch(card.advice, /认证成功|已激活/);
   assert.match(card.advice, /认证失败/);
+});
+test('N54: personal machine account evidence at the school domain is high confidence', () => {
+  const data = bFixture();
+  data.emailScan.emailEvidence = [{ kind: 'WHITELIST_EMAIL', email: 's***@dnui.edu.cn', paths: ['IntelliJIdea\\options\\other.xml'], accountRelated: true }];
+  const result = app.analyze(data);
+  assert.equal(result.student.tier, 'HIGH');
+  assert.match(studentCard(result).advice, /个人电脑/);
+});
+test('N54: an account-related other-domain email is a direct mismatch on a personal machine', () => {
+  const data = bFixture();
+  data.emailScan.emailEvidence = [{ kind: 'OTHER_EMAIL', email: 'q***@qq.com', paths: ['IntelliJIdea\\options\\other.xml'], accountRelated: true }];
+  const result = app.analyze(data);
+  assert.equal(result.student.tier, 'MISMATCH');
+  assert.match(studentCard(result).advice, /你可能登录错账号了/);
+});
+test('N55/N56: portal return stays blocked before confirmation and rejects logged-out text', () => {
+  assert.equal(app.analyzePortalReturn({ text: 'Sign in', loginConfirmed: false }).state, 'NOT_STARTED');
+  for (const text of ['Sign in', '请登录或注册 ' + 'x'.repeat(260), '已打开页面 ' + 'x'.repeat(260)]) {
+    const result = app.analyzePortalReturn({ text, loginConfirmed: true });
+    assert.equal(result.state, 'NOT_LOGGED_IN');
+    assert.equal(result.kind, 'NONE');
+    assert.match(result.message, /未登录/);
+  }
+});
+test('N55/N58: logged-in DNUI subscription text is highest-priority evidence', () => {
+  const data = bFixture();
+  const portal = { loginConfirmed: true, text: 'Educational subscription account student@dnui.edu.cn licenses ' + 'x'.repeat(240) };
+  const result = app.analyze(data, { email: 'other@qq.com', confirmed: true }, portal);
+  assert.equal(result.student.tier, 'HIGH');
+  assert.equal(result.student.source, 'portal');
+  assert.equal(result.student.official.state, 'LOGGED_IN');
+});
+test('N57/N58/Q29: static B flow has no password field and keeps the four blocks in order', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.doesNotMatch(html, /type=["']password["']/i);
+  assert.match(html, /不会看到、不会保存，也不会要求你填写密码/);
+  const positions = ['auth-machine', 'auth-witness', 'auth-portal', 'auth-final'].map(id => html.indexOf('id="' + id + '"'));
+  assert.ok(positions.every(position => position >= 0));
+  assert.deepEqual(positions.slice().sort((a, b) => a - b), positions);
+  assert.ok(html.indexOf('id="portal-copy-step" hidden') > html.indexOf('id="portal-login-done"'));
+  assert.match(html, /第 1 步 \/ 共 3 步/);
+  assert.match(html, /第 2 步 \/ 共 3 步/);
+  assert.match(html, /这一步完成了，请继续看下面的最终动作/);
+});
+test('Q30: report records portal login state without the copied full email', () => {
+  const data = bFixture();
+  const portal = { loginConfirmed: true, text: 'Educational subscription account private.student@dnui.edu.cn ' + 'x'.repeat(250) };
+  const report = app.buildHumanReport(app.analyze(data, {}, portal));
+  assert.match(report, /官网登录回传登录态：LOGGED_IN/);
+  assert.match(report, /p\*\*\*@dnui\.edu\.cn/);
+  assert.doesNotMatch(report, /private\.student@dnui\.edu\.cn/);
+});
+test('N59: the two paste targets are structurally separated and the portal target starts hidden', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const local = html.indexOf('id="input"');
+  const recheck = html.indexOf('class="step recheck"');
+  const auth = html.indexOf('id="student-auth"');
+  const portal = html.indexOf('id="portal-return-text"');
+  assert.ok(local >= 0 && recheck > local && auth > recheck && portal > auth);
+  assert.match(html, /id="portal-copy-step" hidden/);
+});
+test('N60: cross-pasted portal text is blocked before result parsing', () => {
+  const issue = app.crossPasteIssue('Sign in to view your Educational Licenses', 'result');
+  assert.equal(issue.target, 'portal-return-text');
+  assert.match(issue.message, /官网页面文本/);
+  assert.match(issue.message, /JavaCheck\.bat/);
+});
+test('N60: cross-pasted detection JSON is blocked before portal parsing', () => {
+  const issue = app.crossPasteIssue('{"schemaVersion":2,"JAVA_HOME":"C:\\\\JDK","exec":{}}', 'portal');
+  assert.equal(issue.target, 'input');
+  assert.match(issue.message, /检测结果 JSON/);
+  assert.match(issue.message, /第 2 步/);
+});
+test('N61/Q31/Q32: paste targets expose distinct labels, states, summaries and jump guidance', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const appJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'app.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'assets', 'auth-flow.css'), 'utf8');
+  assert.match(html, /本机<\/span>第 2 步：粘贴 JavaCheck 检测结果/);
+  assert.match(html, /官网<\/span>第 6 步：官网登录回传/);
+  assert.match(html, /在这里按 Ctrl\+V 粘贴运行结果（或拖入 result\.txt）/);
+  assert.match(html, /在这里按 Ctrl\+V 粘贴 JetBrains 官网页面的内容/);
+  assert.match(html, /id="input-state"/);
+  assert.match(html, /id="portal-paste-state"/);
+  assert.match(appJs, /带我去正确的框/);
+  assert.match(appJs, /检测到采集时间/);
+  assert.match(appJs, /检测到域名\/邮箱证据/);
+  assert.match(css, /\.paste-box\.local-paste/);
+  assert.match(css, /\.paste-box\.portal-paste/);
+  assert.match(css, /\.paste-target/);
 });
 test('N38: deterministic ZIP ignores prior email input paths', () => {
   const first = app.createZip(app.packageEntries());

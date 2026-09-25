@@ -15,6 +15,7 @@ const root = path.resolve(__dirname, '..');
 const files = {
   html: path.join(root, 'index.html'),
   css: path.join(root, 'assets', 'style.css'),
+  authCss: path.join(root, 'assets', 'auth-flow.css'),
   templates: path.join(root, 'assets', 'script-template.js'),
   app: path.join(root, 'assets', 'app.js'),
   output: path.join(root, 'dist', 'JavaIDEA自检工具-离线版.html')
@@ -38,7 +39,7 @@ function inlineScript(source) {
 }
 
 function build() {
-  const css = read(files.css);
+  const css = read(files.css) + '\n' + read(files.authCss);
   const templates = read(files.templates);
   const app = read(files.app);
   let html = read(files.html);
@@ -58,6 +59,7 @@ function build() {
     '<style data-offline-inline="style">\n' + css + '\n</style>',
     'The stylesheet link'
   );
+  html = replaceExactly(html, '<link rel="stylesheet" href="assets/auth-flow.css">', '', 'The authentication stylesheet link');
 
   html = replaceExactly(
     html,

@@ -220,6 +220,19 @@
       throw jsonError;
     }
   }
+  function crossPasteIssue(text, target) {
+    const source = String(text || '').trim();
+    if (!source) return null;
+    const checkMarkers = /schemaVersion|JAVA_HOME|(?:^|["\s,{])exec(?:["\s,:}]|$)/i;
+    const portalMarkers = /sign\s*in|log\s*in|licenses?|educational|create\s+account|登录|注册|订阅/i;
+    if (target === 'result' && (portalMarkers.test(source) || !checkMarkers.test(source))) {
+      return { target: 'portal-return-text', message: '这看起来是官网页面文本，不是检测结果。检测结果应该是运行 JavaCheck.bat 后生成的。请把它粘到下面 B 区的框里，或回到第 1 步重新运行脚本。' };
+    }
+    if (target === 'portal' && (/^\s*\{/.test(source) || checkMarkers.test(source))) {
+      return { target: 'input', message: '这看起来是检测结果 JSON，不是官网页面文本。请把它粘到上面第 2 步的框里，或回到第 6 步复制 licenses 页面内容。' };
+    }
+    return null;
+  }
 
   function card(cards, area, name, status, value, advice) {
     let output;
@@ -228,7 +241,7 @@
   }
   function commandWorks(command) { return Boolean(command && command.exitCode === 0 && /(?:version\s+"?\d|版本\s+"?\d|javac\s+\d|openjdk\s+\d)/i.test(command.output || '')); }
 
-  function analyzeManual(data) {
+  function analyzeManual(data, witness, portal) {
     const cards = [];
     const javaOK = commandWorks(data.exec.java);
     const javacPath = data.javaProbe.manualJavacPath || '';
@@ -236,9 +249,13 @@
     card(cards, 'A', '简化 Java 环境检查', javaOK && javacOK ? 'PASS' : 'FAIL', { JAVA_HOME: data.env.effectiveJavaHome || '未设置', java: data.exec.java.output, javac: data.exec.javac.output, javacPath: javacPath || '未找到' }, javaOK && javacOK ? 'java 与 javac 均已找到。此路径只核对核心 Java 环境，完整路径一致性请运行 ZIP 内的 JavaCheck.bat。' : !javacPath ? '没有找到编译器 javac.exe。你可能只安装了 JRE，或 javac 没有加入 Path；请安装完整 JDK 或运行完整检测。' : '请确认 JAVA_HOME、Path、java 和 javac 输出后重新检查。');
     card(cards, 'A', 'JAVA_HOME（简化信息）', data.env.effectiveJavaHome ? 'MANUAL' : 'FAIL', data.env.effectiveJavaHome || '未设置', data.env.effectiveJavaHome ? '免下载检查无法访问磁盘验证该目录；完整检测可检查 bin\\javac.exe。' : '未看到 JAVA_HOME。完整检测或 ZIP 内的 JavaRepair.bat 可以给出更准确建议。');
     const boundary = '这是简化检查，只覆盖 Java 环境。学生认证仍需运行完整检测脚本，或按下面的三步手动确认。';
-    card(cards, 'B', 'IDEA 学生认证', 'MANUAL', '免下载路径不会扫描 IDEA、Toolbox 或教育邮箱。', boundary + ' Manage Subscriptions → 找不到教育包时 Refresh license list → 选择教育包并 Activate。');
+    const student = resolveStudentEvidence(data, witness, portal);
+    card(cards, 'B', '机器认证证据', 'MANUAL', '免下载路径不会扫描 IDEA、Toolbox 或教育邮箱。', boundary);
+    card(cards, 'B', '人证：IDEA 当前登录账户', 'MANUAL', { email: student.witnessMasked || '未填写', participates: '免下载路径不参与自动升档' }, '免下载路径无法确认 IDEA 是否安装或启动，请在完整检测后再填写 IDEA 当前账户人证。');
+    card(cards, 'B', '官网登录回传', student.official.kind === 'WHITELIST' ? 'PASS' : student.official.kind === 'OTHER' ? 'WARN' : 'MANUAL', { loginStatus: student.official.state, emailEvidence: student.official.emails }, student.official.message);
+    card(cards, 'B', '最终动作', 'MANUAL', { tier: 'MANUAL', portalLoginStatus: student.official.state }, boundary + ' Manage Subscriptions → 找不到教育包时 Refresh license list → 选择教育包并 Activate。');
     const failed = cards.some(item => item.area === 'A' && item.status === 'FAIL');
-    return { cards, summary: failed ? 'Java 环境的简化检查发现问题，需要安装或配置完整 JDK。' : 'Java 核心命令可以运行；学生认证尚未检查。', status: failed ? 'FAIL' : 'MANUAL', repair: failed, repairLabel: '运行 ZIP 内的 JavaRepair.bat', data, manual: true, manualNotice: boundary };
+    return { cards, summary: failed ? 'Java 环境的简化检查发现问题，需要安装或配置完整 JDK。' : 'Java 核心命令可以运行；学生认证尚未检查。', status: failed ? 'FAIL' : 'MANUAL', repair: failed, repairLabel: '运行 ZIP 内的 JavaRepair.bat', data, student, manual: true, manualNotice: boundary };
   }
 
   function machineEvidence(scan, data) {
@@ -258,11 +275,34 @@
       errors: Array.isArray(value.errors) ? value.errors : []
     };
   }
-  function resolveStudentEvidence(data, witness) {
+  function extractEmails(text) {
+    const found = String(text || '').match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) || [];
+    return Array.from(new Set(found.map(normalizeEmail).filter(Boolean)));
+  }
+  function analyzePortalReturn(portal) {
+    const text = String(portal && portal.text || '').trim();
+    const loginConfirmed = Boolean(portal && portal.loginConfirmed);
+    const emails = extractEmails(text);
+    const whitelistLiteral = EDU_DOMAIN_WHITELIST.some(domain => new RegExp('(^|[^A-Za-z0-9.-])' + domain.replace(/\./g, '\\.') + '(?=$|[^A-Za-z0-9.-])', 'i').test(text));
+    const accountContext = /educational|education|license|licen[cs]e|subscription|account|账户|订阅|教育/i.test(text);
+    const loginEntry = /sign\s*in|log\s*in|登录|注册|create\s+account/i.test(text);
+    const base = { loginConfirmed, length: text.length, emails: emails.map(mask), whitelistLiteral, rawState: 'NOT_STARTED' };
+    if (!loginConfirmed) return Object.assign(base, { state: 'NOT_STARTED', kind: 'NONE', message: '请先在 JetBrains 官方网站完成登录，再点击“我已登录好，下一步”。' });
+    if (!text) return Object.assign(base, { state: 'WAITING', kind: 'NONE', message: '请打开订阅管理页，确认右上角为你的教育邮箱后，全选页面文本并粘贴回来。' });
+    if (text.length < 200 || (loginEntry && !whitelistLiteral && emails.length === 0) || (!whitelistLiteral && emails.length === 0)) {
+      return Object.assign(base, { state: 'NOT_LOGGED_IN', kind: 'NONE', message: '你复制的看起来是未登录的页面，请先回到第一步登录，登录成功后再复制。' });
+    }
+    if (whitelistLiteral && accountContext) return Object.assign(base, { state: 'LOGGED_IN', kind: 'WHITELIST', message: '官网回传已读到本校教育邮箱域名和订阅页面信息。' });
+    if (emails.some(email => isEduDomain(emailDomain(email)))) return Object.assign(base, { state: 'LOGGED_IN', kind: 'WHITELIST', message: '官网回传已读到本校教育邮箱。' });
+    if (emails.length) return Object.assign(base, { state: 'LOGGED_IN', kind: 'OTHER', message: '官网回传显示的账户不是本校教育邮箱。请换回 @dnui.edu.cn 账户登录。' });
+    return Object.assign(base, { state: 'LOGGED_IN', kind: 'UNKNOWN', message: '已复制页面，但没有读到可核验的账户邮箱；请确认复制的是登录后的订阅管理页。' });
+  }
+  function resolveStudentEvidence(data, witness, portal) {
     const machine = machineEvidence(data.emailScan, data);
     const installed = Array.isArray(data.idea.installations) && data.idea.installations.length > 0;
     const rawWitness = witness && witness.email ? String(witness.email) : '';
     const normalizedWitness = normalizeEmail(rawWitness);
+    const witnessMasked = normalizedWitness ? mask(normalizedWitness) : '';
     const witnessDomain = emailDomain(rawWitness);
     const witnessProvided = Boolean(rawWitness.trim());
     const witnessEligible = witnessProvided && installed && machine.configPresent;
@@ -270,30 +310,42 @@
     const machineHigh = machine.whitelistEvidence.length > 0;
     const machineMismatch = machine.accountOthers.length > 0;
     const supportingEvidence = machine.credentialEntries.length > 0 || machine.credentialFiles.length > 0;
+    const official = analyzePortalReturn(portal);
     let tier = 'MANUAL';
-    if (witnessEligible && witnessKind === 'WHITELIST') tier = 'HIGH';
+    let source = 'machine';
+    if (official.kind === 'WHITELIST') { tier = 'HIGH'; source = 'portal'; }
+    else if (official.kind === 'OTHER') { tier = 'MISMATCH'; source = 'portal'; }
+    else if (witnessEligible && witnessKind === 'WHITELIST') { tier = 'HIGH'; source = 'witness'; }
     else if (machineHigh) tier = 'HIGH';
-    else if (witnessEligible && witnessKind === 'OTHER') tier = 'MISMATCH';
+    else if (witnessEligible && witnessKind === 'OTHER') { tier = 'MISMATCH'; source = 'witness'; }
     else if (machineMismatch) tier = 'MISMATCH';
-    else if (supportingEvidence) tier = 'MEDIUM';
+    else if (supportingEvidence) { tier = 'MEDIUM'; source = 'machine'; }
     const conflicts = [];
-    if (witnessEligible && witnessKind === 'WHITELIST' && machine.accountOthers.length) conflicts.push(...machine.accountOthers);
-    if (witnessEligible && witnessKind === 'OTHER' && machineHigh) conflicts.push(...machine.whitelistEvidence);
+    if (official.kind === 'WHITELIST') {
+      if (witnessEligible && witnessKind === 'OTHER') conflicts.push({ source: '人证', email: witnessMasked || '其他邮箱' });
+      conflicts.push(...machine.accountOthers);
+    } else if (official.kind === 'OTHER') {
+      if (witnessEligible && witnessKind === 'WHITELIST') conflicts.push({ source: '人证', email: witnessMasked });
+      conflicts.push(...machine.whitelistEvidence);
+    } else {
+      if (witnessEligible && witnessKind === 'WHITELIST' && machine.accountOthers.length) conflicts.push(...machine.accountOthers);
+      if (witnessEligible && witnessKind === 'OTHER' && machineHigh) conflicts.push(...machine.whitelistEvidence);
+    }
     return {
-      tier, machine, installed, witnessProvided, witnessEligible, witnessKind,
-      witnessEmail: normalizedWitness, witnessMasked: normalizedWitness ? mask(normalizedWitness) : '',
+      tier, source, machine, installed, witnessProvided, witnessEligible, witnessKind, official,
+      witnessEmail: normalizedWitness, witnessMasked,
       witnessConfirmed: Boolean(witness && witness.confirmed), conflicts
     };
   }
   function studentTierCopy(result) {
-    if (result.tier === 'HIGH') return ['PASS', '高可信：IDEA 里登录的是本校教育邮箱（@dnui.edu.cn）。'];
+    if (result.tier === 'HIGH') return ['PASS', result.source === 'portal' ? '高可信：官网登录回传显示本校教育邮箱。' : result.source === 'witness' ? '高可信：IDEA 当前账户人证是本校教育邮箱。' : '高可信：个人电脑的机器证据命中本校教育邮箱域名。'];
     if (result.tier === 'MEDIUM') return ['WARN', '中可信：检测到这台机器登录过 JetBrains 账户的辅助证据，但没读到本校邮箱域名。'];
-    if (result.tier === 'MISMATCH') return ['WARN', '明显不符：检测到的当前或账户相关邮箱不是本校教育邮箱。请换回本校邮箱登录 IDEA。'];
+    if (result.tier === 'MISMATCH') return ['WARN', '明显不符：检测到的当前或账户相关邮箱不是本校教育邮箱。你可能登录错账号了，请换回本校邮箱登录。'];
     if (result.machine.status === 'UNKNOWN') return ['MANUAL', '这项没能检查，可以重跑一次；没找到证据不等于认证失败。'];
     return ['MANUAL', '没找到证据 ≠ 认证失败。请按下方三步在 IDEA 中人工确认。'];
   }
-  function analyze(data, witness) {
-    if (data && data.manualOnly) return analyzeManual(data);
+  function analyze(data, witness, portal) {
+    if (data && data.manualOnly) return analyzeManual(data, witness, portal);
     const cards = [];
     const probe = data.javaProbe;
     const candidates = probe.candidates.filter(item => item.valid === true);
@@ -316,11 +368,12 @@
     card(cards, 'A', '旧版 JRE 子目录', probe.jreBinExists ? 'PASS' : 'WARN', probe.jreBinExists ? '存在' : '未发现独立 jre\\bin', 'JDK 9 及以后通常没有独立 jre 目录，不需要为此安装或修复。');
     card(cards, 'A', 'jetbra / pojie 残留变量', data.jetbraTrace && data.jetbraTrace.some(item => item.matched) ? 'WARN' : 'PASS', data.jetbraTrace || [], '仅报告变量名，不自动清理变量、文件或 IDEA 配置。请联系助教核对后再处理。');
     const installs = data.idea.installations;
-    card(cards, 'B', 'IDEA 安装与版本', installs.length ? 'PASS' : 'MANUAL', installs.length ? installs : '未检测到 IDEA', installs.length ? '展示所有版本，最新版本排在前面。' : '未检测到 IDEA，请先安装 IDEA 再做学生认证。这不影响 Java 环境结论。');
-    const student = resolveStudentEvidence(data, witness);
-    card(cards, 'B', 'JetBrains / Toolbox 配置', student.machine.configPresent ? 'PASS' : 'MANUAL', data.jetbrainsDirs || [], student.machine.configPresent ? '发现 JetBrains 或 Toolbox 配置目录。Toolbox 登录后，IDEA 通常可沿用账号信息。' : 'IDEA 已安装但还没有启动记录时，请先启动一次再检测。');
+    const student = resolveStudentEvidence(data, witness, portal);
     const machineStatus = student.machine.status === 'UNKNOWN' ? 'MANUAL' : student.machine.whitelistEvidence.length ? 'PASS' : (student.machine.credentialEntries.length || student.machine.credentialFiles.length) ? 'WARN' : 'MANUAL';
     card(cards, 'B', '机器认证证据', machineStatus, {
+      ideaInstallations: installs,
+      configDirectories: data.jetbrainsDirs || [],
+      configPresent: student.machine.configPresent,
       status: student.machine.status,
       domainEvidence: student.machine.domainEvidence,
       emailEvidence: student.machine.emailEvidence,
@@ -328,7 +381,7 @@
       credentialFiles: student.machine.credentialFiles,
       xmlEvidence: (data.emailScan && data.emailScan.xmlEvidence) || [],
       errors: student.machine.errors
-    }, student.machine.status === 'UNKNOWN' ? '这项没能检查，可以重跑一次。' : student.machine.whitelistEvidence.length ? '扫描到本校教育邮箱域名证据。' : (student.machine.credentialEntries.length || student.machine.credentialFiles.length) ? '检测到 JetBrains 账户或凭据库辅助证据，但没有读到本校邮箱域名。' : '没有读到自动比对证据；这不等于认证失败。');
+    }, !installs.length ? '未检测到 IDEA，请先安装并至少启动一次。这不影响 Java 环境结论。' : student.machine.status === 'UNKNOWN' ? '这项没能检查，可以重跑一次。' : student.machine.whitelistEvidence.length ? '个人电脑的账户/配置证据命中本校教育邮箱域名，作为高可信机器证据。' : (student.machine.credentialEntries.length || student.machine.credentialFiles.length) ? '检测到 JetBrains 账户或凭据库辅助证据，但没有读到本校邮箱域名。' : '没有读到自动比对证据；这不等于认证失败。');
     const witnessStatus = !student.witnessProvided ? 'MANUAL' : !student.installed ? 'MANUAL' : !student.machine.configPresent ? 'MANUAL' : student.witnessKind === 'WHITELIST' ? 'PASS' : student.witnessKind === 'OTHER' ? 'WARN' : 'MANUAL';
     const witnessAdvice = !student.witnessProvided
       ? '打开 IDEA → 右上角头像或 Help | Register → Manage Subscriptions，把左下角显示的当前账户邮箱粘贴到本页人证框。'
@@ -340,9 +393,11 @@
             ? '人证为本校教育邮箱，优先于文件扫描证据。'
             : '当前人证不是 @dnui.edu.cn。请在 IDEA 中换回本校教育邮箱登录。';
     card(cards, 'B', '人证：IDEA 当前登录账户', witnessStatus, { email: student.witnessMasked || '未填写', confirmed: student.witnessConfirmed ? '已确认' : '未勾选', participates: student.witnessEligible ? '参与判定' : '暂不参与判定' }, witnessAdvice);
+    const portalStatus = student.official.kind === 'WHITELIST' ? 'PASS' : student.official.kind === 'OTHER' ? 'WARN' : 'MANUAL';
+    card(cards, 'B', '官网登录回传', portalStatus, { loginStatus: student.official.state, emailEvidence: student.official.emails, textLength: student.official.length, domainLiteral: student.official.whitelistLiteral ? '检测到' : '未检测到' }, student.official.message);
     const label = studentTierCopy(student);
-    const conflictNote = student.conflicts.length ? ' 机器里还扫到一个不同的邮箱；如果你在 IDEA 里登录过多个账号，请以左下角当前显示的为准。' : '';
-    card(cards, 'B', '学生认证结论', label[0], { tier: student.tier, witness: student.witnessMasked || '未填写', machineStatus: student.machine.status, conflicts: student.conflicts }, label[1] + conflictNote + ' 以上只能证明 IDEA 登录的是哪个邮箱；教育包是否真的激活，必须在 Manage Subscriptions 里看到教育包并点击 Activate 才算数。');
+    const conflictNote = student.conflicts.length ? ' 还发现了不同的脱敏邮箱；请以官网登录回传或 IDEA 左下角当前显示的账户为准。' : '';
+    card(cards, 'B', '最终动作', label[0], { tier: student.tier, prioritySource: student.source, witness: student.witnessMasked || '未填写', portalLoginStatus: student.official.state, portalEmailEvidence: student.official.emails, machineStatus: student.machine.status, conflicts: student.conflicts }, label[1] + conflictNote + ' 回到 IDEA：Manage Subscriptions → 必要时 Refresh license list → 选择教育包并 Activate。以上只说明账号证据，不作教育包状态的确定性结论。');
     const failures = cards.filter(item => item.area === 'A' && item.status === 'FAIL');
     const summary = !complete ? jreOnly ? '你当前只有 Java 运行能力，不能编译代码，需要安装完整 JDK。' : '你的电脑未找到可用 Java 开发工具（JDK），需要先安装。' : failures.length ? consistency === 'FAIL' ? 'JDK 已安装，但实际运行的版本与配置不一致。' : 'JDK 装好了，但环境变量没配对。' : newer ? '当前 JDK 可以使用，本机另有更新版本，请按课程要求选择。' : 'Java 核心检查通过，可以开始使用；请留意下方提示。';
     const repairLabel = !complete
@@ -372,19 +427,22 @@
     const data = analysis.data;
     const student = analysis.student || null;
     const machine = student && student.machine;
-    const lines = ['Java / IDEA 自检报告', '====================', '一句话结论：' + analysis.summary, '总体状态：' + analysis.status, '采集时间：' + (data.meta.collectedAt || '手动检查时间'), '用户：' + mask(data.meta.user || '未提供'), '', '学生认证证据：', '机器证据档位：' + (student ? student.tier : 'MANUAL'), '机器采集状态：' + (machine ? machine.status : '未采集'), '命中文件：' + (machine ? mask(JSON.stringify(machine.whitelistEvidence.concat(machine.accountOthers))) : '未采集'), '凭据管理器条目：' + (machine ? mask(JSON.stringify(machine.credentialEntries)) : '未采集'), '疑似凭据库文件：' + (machine ? mask(JSON.stringify(machine.credentialFiles)) : '未采集'), '人证邮箱：' + (student ? student.witnessMasked || '未填写' : '未填写'), '学生确认：' + (student && student.witnessConfirmed ? '已勾选' : '未勾选'), '采集异常：' + (machine ? mask(JSON.stringify(machine.errors)) : '未采集'), '', '逐项结果：'];
+    const official = student && student.official;
+    const machineCard = analysis.cards.find(item => item.area === 'B' && item.name === '机器认证证据');
+    const lines = ['Java / IDEA 自检报告', '====================', '一句话结论：' + analysis.summary, '总体状态：' + analysis.status, '采集时间：' + (data.meta.collectedAt || '手动检查时间'), '用户：' + mask(data.meta.user || '未提供'), '', '学生认证证据：', '学生认证结论档位：' + (student ? student.tier : 'MANUAL'), '证据优先来源：' + (student ? student.source : '未采集'), '机器证据档位：' + (machineCard ? machineCard.status : '未采集'), '机器采集状态：' + (machine ? machine.status : '未采集'), '命中文件：' + (machine ? mask(JSON.stringify(machine.whitelistEvidence.concat(machine.accountOthers))) : '未采集'), '凭据管理器条目：' + (machine ? mask(JSON.stringify(machine.credentialEntries)) : '未采集'), '疑似凭据库文件：' + (machine ? mask(JSON.stringify(machine.credentialFiles)) : '未采集'), '人证邮箱：' + (student ? student.witnessMasked || '未填写' : '未填写'), '学生确认：' + (student && student.witnessConfirmed ? '已勾选' : '未勾选'), '官网登录回传登录态：' + (official ? official.state : '未进行'), '官网回传邮箱证据：' + (official ? mask(JSON.stringify(official.emails)) : '未进行'), '官网回传文本不会写入报告：是', '采集异常：' + (machine ? mask(JSON.stringify(machine.errors)) : '未采集'), '', '逐项结果：'];
     analysis.cards.forEach(item => { lines.push('[' + item.area + '] ' + item.name + '：' + item.status, '实际值：' + item.value, '建议：' + item.advice, ''); });
     lines.push('说明：学生认证最终仍需在 IDEA 的订阅管理中人工确认。', '--- 以下为网页解析 JSON，请勿修改 ---', JSON.stringify(data, null, 2));
     return '\uFEFF' + mask(lines.join('\r\n'));
   }
 
-  const api = { SCHEMA, EDU_DOMAIN_WHITELIST, RELEASE_URL, pathKey, mask, normalizeEmail, emailDomain, isEduDomain, machineEvidence, resolveStudentEvidence, crc32, createZip, parseZip, parseResult, parseManualResult, parseAnyResult, analyze, packageEntries, sha256, buildHumanReport };
+  const api = { SCHEMA, EDU_DOMAIN_WHITELIST, RELEASE_URL, pathKey, mask, normalizeEmail, emailDomain, isEduDomain, machineEvidence, extractEmails, analyzePortalReturn, resolveStudentEvidence, crossPasteIssue, crc32, createZip, parseZip, parseResult, parseManualResult, parseAnyResult, analyze, packageEntries, sha256, buildHumanReport };
   root.Checker = api;
   if (typeof module !== 'undefined') module.exports = api;
   if (typeof document === 'undefined') return;
 
   const $ = id => document.getElementById(id);
   let analysis;
+  let portalLoginConfirmed = false;
   const notify = text => { const node = $('notice'); if (node) node.textContent = text; };
   function download(bytes, name, type) {
     const url = URL.createObjectURL(new Blob([bytes], { type: type || 'application/octet-stream' }));
@@ -405,25 +463,91 @@
     const confirmed = $('idea-account-confirmed');
     return { email: email ? email.value : '', confirmed: Boolean(confirmed && confirmed.checked) };
   }
+  function currentPortal() {
+    const text = $('portal-return-text');
+    return { text: text ? text.value : '', loginConfirmed: portalLoginConfirmed };
+  }
+  function setPasteState(id, text, state) {
+    const node = $(id); if (!node) return;
+    node.textContent = text;
+    node.dataset.state = state || 'empty';
+  }
+  function focusPasteTarget(id) {
+    const node = $(id); if (!node) return;
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    node.classList.add('paste-target');
+    node.focus({ preventScroll: true });
+    setTimeout(() => node.classList.remove('paste-target'), 1800);
+  }
+  function showPasteGuidance(id, issue) {
+    const node = $(id); if (!node) return;
+    node.replaceChildren();
+    if (!issue) return;
+    const text = document.createElement('p'); text.textContent = issue.message;
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = '带我去正确的框';
+    button.addEventListener('click', () => focusPasteTarget(issue.target));
+    node.append(text, button);
+  }
+  function badgeText(status) {
+    return { PASS: 'PASS · 通过', FAIL: 'FAIL · 未通过', WARN: 'WARN · 提示', MANUAL: '需人工确认' }[status] || '需人工确认';
+  }
+  function setAuthBlock(prefix, item) {
+    const badge = $('auth-' + prefix + '-badge');
+    const evidence = $('auth-' + prefix + '-evidence');
+    const value = $('auth-' + prefix + '-value');
+    if (badge) { badge.className = 'badge ' + item.status; badge.textContent = badgeText(item.status); }
+    if (evidence) evidence.textContent = item.advice;
+    if (value) value.textContent = item.value;
+  }
+  function renderAuth(analysisResult) {
+    const student = analysisResult.student;
+    const bCards = name => analysisResult.cards.find(item => item.area === 'B' && item.name === name);
+    const machine = bCards('机器认证证据');
+    const witness = bCards('人证：IDEA 当前登录账户');
+    const portal = bCards('官网登录回传');
+    const finalAction = bCards('最终动作');
+    if (!student || !machine || !witness || !portal || !finalAction) return;
+    setAuthBlock('machine', machine);
+    setAuthBlock('witness', witness);
+    setAuthBlock('portal', portal);
+    setAuthBlock('final', finalAction);
+    const summary = $('auth-summary');
+    if (summary) summary.textContent = studentTierCopy(student)[1] + ' 证据优先级：官网登录回传 → IDEA 人证邮箱 → 机器证据。';
+    const copyStep = $('portal-copy-step');
+    if (copyStep) copyStep.hidden = !portalLoginConfirmed;
+    const back = $('portal-back-login');
+    if (back) back.hidden = student.official.state !== 'NOT_LOGGED_IN';
+    const finish = $('portal-finish');
+    if (finish) finish.hidden = student.official.state !== 'LOGGED_IN';
+    if (student.official.state === 'LOGGED_IN') {
+      const evidence = student.official.emails.length ? student.official.emails.join('、') : student.official.whitelistLiteral ? 'dnui.edu.cn' : '未读到邮箱';
+      setPasteState('portal-paste-state', '已粘贴：检测到域名/邮箱证据 ' + evidence + '。');
+    } else if (student.official.state === 'NOT_LOGGED_IN') setPasteState('portal-paste-state', '已粘贴，但看起来仍是未登录页面。');
+    else setPasteState('portal-paste-state', $('portal-return-text').value.trim() ? '已粘贴，等待判断。' : '未粘贴官网页面文本');
+  }
   function render() {
     try {
-      const data = parseAnyResult($('input').value); analysis = analyze(data, currentWitness()); const host = $('cards'); host.replaceChildren();
+      const source = $('input').value;
+      const issue = crossPasteIssue(source, 'result');
+      if (issue) { showPasteGuidance('input-guidance', issue); notify(issue.message); return; }
+      showPasteGuidance('input-guidance', null);
+      const data = parseAnyResult(source); analysis = analyze(data, currentWitness(), currentPortal()); const host = $('cards'); host.replaceChildren();
       $('summary').textContent = analysis.summary; $('overall').textContent = { FAIL: '环境配置未通过', PASS: '环境配置通过', WARN: '核心环境可用，请留意提示', MANUAL: '部分信息需要人工确认' }[analysis.status]; $('overall').className = 'badge ' + analysis.status;
       const age = Math.floor((Date.now() - Date.parse(data.meta.collectedAt)) / 60000);
       $('meta').textContent = '采集时间：' + data.meta.collectedAt + ' · 用户：' + mask(data.meta.user) + '。请确认这是你自己的最新结果。' + (age > 30 ? ' 这是 ' + age + ' 分钟前的结果，建议重新检测。' : age < -5 ? ' 采集时间晚于当前时间，请核对电脑时钟。' : '');
+      setPasteState('input-state', '已粘贴：检测到采集时间 ' + data.meta.collectedAt + '，用户：' + mask(data.meta.user || '未提供') + '。');
       if ($('manual-boundary')) { $('manual-boundary').hidden = !analysis.manual; $('manual-boundary').textContent = analysis.manual ? analysis.manualNotice : ''; }
-      ['A', 'B'].forEach(area => {
-        const heading = document.createElement('h3'); heading.textContent = area === 'A' ? 'A. Java 环境配置' : 'B. IDEA 学生认证'; host.append(heading);
-        analysis.cards.filter(item => item.area === area).forEach(item => {
-          const row = document.createElement('article'); row.className = 'result ' + item.status;
-          const title = document.createElement('h4'); title.textContent = item.name;
-          const badge = document.createElement('span'); badge.className = 'badge ' + item.status; badge.textContent = { PASS: 'PASS · 通过', FAIL: 'FAIL · 未通过', WARN: 'WARN · 提示', MANUAL: '需人工确认' }[item.status];
-          const actual = document.createElement('pre'); actual.textContent = item.value;
-          const advice = document.createElement('p'); advice.textContent = item.advice;
-          row.append(title, badge, actual, advice); host.append(row);
-        });
+      const heading = document.createElement('h3'); heading.textContent = 'A. Java 环境配置'; host.append(heading);
+      analysis.cards.filter(item => item.area === 'A').forEach(item => {
+        const row = document.createElement('article'); row.className = 'result ' + item.status;
+        const title = document.createElement('h4'); title.textContent = item.name;
+        const badge = document.createElement('span'); badge.className = 'badge ' + item.status; badge.textContent = badgeText(item.status);
+        const actual = document.createElement('pre'); actual.textContent = item.value;
+        const advice = document.createElement('p'); advice.textContent = item.advice;
+        row.append(title, badge, actual, advice); host.append(row);
       });
       $('repair').hidden = !analysis.repair; $('repair').textContent = analysis.repairLabel; $('export').disabled = false; $('confirmation').hidden = false;
+      renderAuth(analysis);
       notify('已在浏览器本地完成分析，没有上传任何数据。');
     } catch (error) {
       analysis = null; $('repair').hidden = true; $('export').disabled = true; $('cards').replaceChildren(); $('summary').textContent = '请重新导入完整结果'; $('overall').textContent = ''; $('confirmation').hidden = true;
@@ -448,11 +572,15 @@
   }
   updateDeviceWarning(); window.addEventListener('resize', updateDeviceWarning);
   $('generate').addEventListener('click', buildPackage); $('analyze').addEventListener('click', render); $('manual-copy').addEventListener('click', copyManual);
-  $('clear').addEventListener('click', () => { const email = $('idea-account-email'); const confirmed = $('idea-account-confirmed'); if (email) email.value = ''; if (confirmed) confirmed.checked = false; if (analysis) render(); notify('已清空本页人证输入；页面不会保存该邮箱。'); });
-  ['idea-account-email', 'idea-account-confirmed'].forEach(id => { const element = $(id); if (element) element.addEventListener('change', () => { if (analysis) render(); }); });
+  $('clear').addEventListener('click', () => { const email = $('idea-account-email'); const confirmed = $('idea-account-confirmed'); const portal = $('portal-return-text'); if (email) email.value = ''; if (confirmed) confirmed.checked = false; if (portal) portal.value = ''; portalLoginConfirmed = false; showPasteGuidance('portal-guidance', null); setPasteState('portal-paste-state', '未粘贴官网页面文本'); if (analysis) render(); notify('已清空本页认证输入；页面不会保存邮箱或官网页面文本。'); });
+  ['idea-account-email', 'idea-account-confirmed'].forEach(id => { const element = $(id); if (element) element.addEventListener(id === 'idea-account-confirmed' ? 'change' : 'input', () => { if (analysis) render(); }); });
+  $('portal-return-text').addEventListener('input', () => { const issue = crossPasteIssue($('portal-return-text').value, 'portal'); showPasteGuidance('portal-guidance', issue); if (issue) { notify(issue.message); return; } if (analysis) render(); });
+  $('portal-login-done').addEventListener('click', () => { portalLoginConfirmed = true; if (analysis) render(); notify('请打开订阅管理页并复制登录后的页面文本，再粘贴到第 6 步框。'); });
+  $('portal-back-login').addEventListener('click', () => { portalLoginConfirmed = false; const portal = $('portal-return-text'); if (portal) portal.value = ''; showPasteGuidance('portal-guidance', null); setPasteState('portal-paste-state', '未粘贴官网页面文本'); if (analysis) render(); notify('已回到官网登录引导。请先在 JetBrains 官方网站登录。'); });
   $('repair').addEventListener('click', () => notify('请关闭当前黑色窗口，回到刚才解压的同一个文件夹，双击 JavaRepair.bat。修复结束后，再双击 JavaCheck.bat 重新检测。'));
   $('export').addEventListener('click', () => { if (analysis) download(encode(buildHumanReport(analysis)), 'java-idea-check-result.txt', 'text/plain;charset=utf-8'); });
   $('file').addEventListener('change', event => importFile(event.target.files[0]).catch(error => notify(error.message)));
+  $('input').addEventListener('input', () => { const issue = crossPasteIssue($('input').value, 'result'); showPasteGuidance('input-guidance', issue); if (issue) { notify(issue.message); return; } setPasteState('input-state', $('input').value.trim() ? '已粘贴检测结果：点击“开始分析”查看结论。' : '未粘贴检测结果'); });
   $('input').addEventListener('dragover', event => event.preventDefault());
   $('input').addEventListener('drop', event => { event.preventDefault(); importFile(event.dataTransfer.files[0]).catch(error => notify(error.message)); });
 })(typeof globalThis !== 'undefined' ? globalThis : window);

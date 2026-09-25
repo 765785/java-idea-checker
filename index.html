@@ -6,11 +6,12 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Java 环境与 IDEA 学生认证自检</title>
   <link rel="stylesheet" href="assets/style.css">
+  <link rel="stylesheet" href="assets/auth-flow.css">
   <script src="assets/script-template.js" defer></script>
   <script src="assets/app.js" defer></script>
 </head>
 <body>
-  <a class="skip" href="#email">跳到检测操作</a>
+  <a class="skip" href="#input">跳到检测操作</a>
   <header>
     <p class="eyebrow">Windows 桌面端自检工具</p>
     <h1>Java 环境与 IDEA 学生认证自检</h1>
@@ -24,7 +25,7 @@
       <span>1. 下载压缩包</span><span>2. 运行检测</span><span>3. 粘贴结果</span><span>4. 按提示修复并复检</span>
     </section>
 
-    <section class="step">
+    <section class="step paste-step local-paste-step">
       <span class="number" aria-hidden="true">1</span>
       <div class="body">
         <h2>下载检测工具压缩包</h2>
@@ -71,10 +72,12 @@
     <section class="step">
       <span class="number" aria-hidden="true">2</span>
       <div class="body">
-        <h2>粘贴检测结果</h2>
-        <p>支持完整 JSON、控制台原文、免下载检查输出，或直接拖入 <code>result.txt</code>。分析全部在当前浏览器完成。</p>
+        <h2><span class="paste-origin local-origin">本机</span>第 2 步：粘贴 JavaCheck 检测结果</h2>
+        <p>这里<strong>只粘贴</strong>双击 <code>JavaCheck.bat</code> 后生成的 JSON / 控制台原文，或直接拖入 <code>result.txt</code>。官网页面文本不要粘在这里。</p>
         <label class="sr-only" for="input">检测结果</label>
-        <textarea id="input" rows="8" spellcheck="false" placeholder="在这里 Ctrl+V，或把 result.txt 拖到这里"></textarea>
+        <textarea id="input" class="paste-box local-paste" rows="8" spellcheck="false" placeholder="在这里按 Ctrl+V 粘贴运行结果（或拖入 result.txt）"></textarea>
+        <p id="input-state" class="paste-state">未粘贴检测结果</p>
+        <div id="input-guidance" class="paste-guidance" role="status" aria-live="polite"></div>
         <div class="actions">
           <button id="analyze" class="primary">开始分析</button>
           <label class="button" for="file">选择 result.txt</label>
@@ -89,8 +92,8 @@
       <span class="number" aria-hidden="true">3</span>
       <div class="body">
         <div class="result-heading">
-          <h2>你现在的情况</h2>
-          <div class="actions"><button id="export" disabled>导出结果 txt</button><button id="clear">清空本页人证输入</button></div>
+          <h2>第 3 步：查看 Java 环境结论与修复入口</h2>
+          <div class="actions"><button id="export" disabled>导出结果 txt</button><button id="clear">清空本页认证输入</button></div>
         </div>
         <div class="summary">
           <span id="overall" class="badge"></span>
@@ -105,11 +108,34 @@
           <p>没有可用 JDK 时才可能请求管理员权限以安装 JDK。不会改 CLASSPATH、删除 jetbra/pojie、修改 IDEA 登录或许可证。修复成功后，请关闭窗口，普通双击 <code>JavaCheck.bat</code> 重新检测。</p>
         </details>
         <div id="cards"></div>
+      </div>
+    </section>
+
+    <section class="step recheck">
+      <span class="number" aria-hidden="true">4</span>
+      <div class="body">
+        <h2>第 4 步：需要修复时，按页面提示复检</h2>
+        <p>只有第 3 步明确显示需要修复时，才在刚才解压的文件夹中双击 <code>JavaRepair.bat</code>。修复结束后关闭窗口，再普通双击 <code>JavaCheck.bat</code>，把新的结果粘贴回<strong>第 2 步本机检测结果框</strong>。</p>
+        <p>学校机房、离线电脑或管理员拒绝安装时，页面会给出手动安装 JDK 的下一步；不要把 JRE 目录当作 JDK 使用。</p>
+      </div>
+    </section>
+
+    <section class="step auth-step" id="student-auth" aria-label="B 区学生认证">
+      <span class="number" aria-hidden="true">5</span>
+      <div class="body">
         <aside id="confirmation" class="confirmation" hidden>
-          <h3>学生认证：最后仍要在 IDEA 里人工确认</h3>
-          <p>机器扫描只能提供辅助证据。请把 IDEA 当前实际显示的账户邮箱作为人证；它仍不等于教育包已经激活。</p>
-          <div class="witness">
-            <h4>人证：复制 IDEA 当前登录的账户邮箱</h4>
+          <h3>学生认证：按顺序完成四块信息</h3>
+          <p id="auth-summary" class="auth-summary">请先查看机器证据，再依次完成 IDEA 人证与官网登录回传。</p>
+          <p class="small">适用前提：这是你自己的个人电脑，一人一机。多人共用电脑上的扫描结果只能作参考。</p>
+
+          <section class="auth-block" id="auth-machine">
+            <div class="auth-title"><h4>1. 机器证据（自动）</h4><span id="auth-machine-badge" class="badge MANUAL">需人工确认</span></div>
+            <p id="auth-machine-evidence"></p>
+            <pre id="auth-machine-value"></pre>
+          </section>
+
+          <section class="auth-block" id="auth-witness">
+            <div class="auth-title"><h4>第 5 步：人证邮箱（IDEA 当前账户）</h4><span id="auth-witness-badge" class="badge MANUAL">需人工确认</span></div>
             <ol>
               <li>打开 IDEA，点击右上角账户头像；也可使用 <code>Help | Register</code>。</li>
               <li>打开 <strong>Manage Subscriptions</strong>（管理订阅）。</li>
@@ -118,25 +144,42 @@
             <label for="idea-account-email">当前 IDEA 登录账户邮箱</label>
             <input id="idea-account-email" type="email" placeholder="你的名字@dnui.edu.cn" autocomplete="off" maxlength="254">
             <label class="check"><input id="idea-account-confirmed" type="checkbox"> 我确认这是 IDEA 当前显示的登录账户</label>
-            <p class="small">“@”前是你自己的邮箱名，每人不同。本页不会保存或上传人证邮箱，展示和导出时会自动脱敏。</p>
-          </div>
-          <ol>
-            <li>进入管理订阅（Manage Subscriptions）。</li>
-            <li>若找不到教育包，点击 Refresh license list。</li>
-            <li>选择教育包，点击 Activate。</li>
-          </ol>
-          <p><strong>以上只能证明 IDEA 登录的是哪个邮箱。教育包是否真的激活，必须在 Manage Subscriptions 里看到教育包并点击 Activate 才算数。</strong></p>
-          <p><a href="https://www.jetbrains.com/help/idea/register.html" target="_blank" rel="noopener noreferrer">官方激活说明</a> · <a href="https://www.jetbrains.com/idea/download/" target="_blank" rel="noopener noreferrer">IDEA 官方下载页</a>（装完 IDEA 后再回来做学生认证）</p>
-        </aside>
-      </div>
-    </section>
+            <p id="auth-witness-evidence" class="small">“@”前是你自己的邮箱名，每人不同。本页不会保存或上传人证邮箱，展示和导出时会自动脱敏。</p>
+          </section>
 
-    <section class="step recheck">
-      <span class="number" aria-hidden="true">4</span>
-      <div class="body">
-        <h2>需要修复时，按页面提示复检</h2>
-        <p>只有第 3 步明确显示需要修复时，才在刚才解压的文件夹中双击 <code>JavaRepair.bat</code>。修复结束后关闭窗口，再普通双击 <code>JavaCheck.bat</code>，把新的结果粘贴回来。</p>
-        <p>学校机房、离线电脑或管理员拒绝安装时，页面会给出手动安装 JDK 的下一步；不要把 JRE 目录当作 JDK 使用。</p>
+          <section class="auth-block portal-paste-step" id="auth-portal">
+            <div class="auth-title"><h4><span class="paste-origin portal-origin">官网</span>第 6 步：官网登录回传（先登录，再复制）</h4><span id="auth-portal-badge" class="badge MANUAL">未进行</span></div>
+            <div id="portal-login-step">
+              <p><strong>第 1 步 / 共 3 步：先登录。</strong>点下面按钮打开 JetBrains 官网，用你的 <code>@dnui.edu.cn</code> 教育邮箱登录。如果已经登录，页面会直接显示你的账户信息；登录好以后，再进行下一步。</p>
+              <p>登录只在 JetBrains 官方网站完成。密码只输入给 JetBrains，本网页不会看到、不会保存，也不会要求你填写密码。</p>
+              <a class="button primary" href="https://account.jetbrains.com/login" target="_blank" rel="noopener noreferrer">打开 JetBrains 账户登录页</a>
+              <button id="portal-login-done" type="button">我已登录好，下一步</button>
+            </div>
+            <div id="portal-copy-step" hidden>
+              <p><strong>第 2 步 / 共 3 步：复制登录后的订阅页面。</strong>打开订阅管理页，确认页面右上角显示的是你的 edu 邮箱后，按 Ctrl+A 全选、Ctrl+C 复制，回到本页粘贴。</p>
+              <p><a class="button" href="https://account.jetbrains.com/licenses" target="_blank" rel="noopener noreferrer">打开 JetBrains 订阅管理页</a></p>
+              <label for="portal-return-text">登录好后再回来这里粘贴 licenses 页面文本</label>
+              <textarea id="portal-return-text" class="paste-box portal-paste" rows="7" spellcheck="false" placeholder="在这里按 Ctrl+V 粘贴 JetBrains 官网页面的内容"></textarea>
+              <p id="portal-paste-state" class="paste-state">未粘贴官网页面文本</p>
+              <div id="portal-guidance" class="paste-guidance" role="status" aria-live="polite"></div>
+              <p id="auth-portal-evidence" class="small">本页只在内存中判断登录状态与域名，不保存页面全文，也不会上传。</p>
+              <button id="portal-back-login" type="button" hidden>返回第 1 步重新登录</button>
+              <p id="portal-finish" class="small" hidden>第 3 步 / 共 3 步：这一步完成了，请继续看下面的最终动作。</p>
+            </div>
+          </section>
+
+          <section class="auth-block final-action" id="auth-final">
+            <div class="auth-title"><h4>第 7 步：最终动作（仍需在 IDEA 确认）</h4><span id="auth-final-badge" class="badge MANUAL">需人工确认</span></div>
+            <p id="auth-final-evidence"></p>
+            <ol>
+              <li>进入管理订阅（Manage Subscriptions）。</li>
+              <li>若找不到教育包，点击 Refresh license list。</li>
+              <li>选择教育包，点击 Activate。</li>
+            </ol>
+            <p><strong>以上只能说明账号证据。教育包是否真的生效，必须在 Manage Subscriptions 里看到教育包并点击 Activate 才算数。</strong></p>
+            <p><a href="https://www.jetbrains.com/help/idea/register.html" target="_blank" rel="noopener noreferrer">官方激活说明</a> · <a href="https://www.jetbrains.com/idea/download/" target="_blank" rel="noopener noreferrer">IDEA 官方下载页</a>（装完 IDEA 后再回来做学生认证）</p>
+          </section>
+        </aside>
       </div>
     </section>
 

@@ -1,2 +1,2 @@
 f5aea985893aa1c348223d210f2753bfa9ca6200cfe4b90fb9e28787d99fd318  JavaIDEA-checker.zip
-7b717f03ca887d0292264b1088d2bf3efdc8438d7b76ff2bfbaacd9d26e388e7  JavaIDEA-checker-offline.html
+39923536cfdd74c345a2f24b15b9a496e93a094bc7c9513496b7305e6e39e806  JavaIDEA-checker-offline.html
