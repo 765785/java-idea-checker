@@ -2,6 +2,7 @@
   'use strict';
 
   const SCHEMA = 2;
+  const PAGE_VERSION = '1.3.0';
   // 换学校时只改这一处；生成的 JavaCheck.ps1 会从这里接收同一份白名单。
   const EDU_DOMAIN_WHITELIST = Object.freeze(['dnui.edu.cn']);
   const RELEASE_URL = 'https://github.com/765785/java-idea-checker/releases';
@@ -150,10 +151,8 @@
     return entries;
   }
 
-  function parseResult(text) {
+  function jsonCandidates(text) {
     const source = String(text).replace(/^\uFEFF/, '').trim();
-    if (!source) throw Error('还没有检测结果。请粘贴内容、拖入 result.txt，或使用下方免下载检查命令。');
-    if (source.length > 8 * 1024 * 1024) throw Error('结果超过 8 MB，请重新运行检测脚本。');
     const candidates = [source];
     let start = -1; let depth = 0; let quoted = false; let escaped = false;
     for (let index = 0; index < source.length; index++) {
@@ -164,13 +163,43 @@
       else if (char === '{') depth++;
       else if (char === '}' && --depth === 0) { candidates.push(source.slice(start, index + 1)); start = -1; }
     }
+    return { source, candidates, hasUnclosedObject: start >= 0 };
+  }
+  function parsedTopLevelJson(text) {
+    const source = String(text).replace(/^\uFEFF/, '').trim();
+    try {
+      const data = JSON.parse(source);
+      return data && typeof data === 'object' && !Array.isArray(data) ? data : null;
+    } catch (_) { return null; }
+  }
+  function hasDetectionFields(data) {
+    return Boolean(data && typeof data === 'object' && ['meta', 'env', 'exec', 'javaProbe', 'idea'].filter(key => Object.prototype.hasOwnProperty.call(data, key)).length >= 2);
+  }
+  function resultInputRecognition(text) {
+    const extracted = jsonCandidates(text);
+    const topLevel = parsedTopLevelJson(extracted.source);
+    const schemaJson = Boolean(topLevel && Object.prototype.hasOwnProperty.call(topLevel, 'schemaVersion'));
+    const fields = hasDetectionFields(topLevel) || extracted.candidates.some(candidate => hasDetectionFields(parsedTopLevelJson(candidate)));
+    const manual = /(?:^|\r?\n)\s*JAVA_HOME\s*=|(?:^|\r?\n)\s*(?:openjdk|java)(?:\s+java)?\s+(?:version|版本)\b/im.test(extracted.source);
+    const balancedJsonAtStart = /^\s*\{/.test(extracted.source) && extracted.candidates.slice(1).some(candidate => Boolean(parsedTopLevelJson(candidate)));
+    return { recognized: schemaJson || fields || manual || balancedJsonAtStart, schemaJson, fields, manual, balancedJsonAtStart };
+  }
+  function parseResult(text) {
+    const source = String(text).replace(/^\uFEFF/, '').trim();
+    if (!source) throw Error('还没有检测结果。请粘贴内容、拖入 result.txt，或使用下方免下载检查命令。');
+    if (source.length > 8 * 1024 * 1024) throw Error('结果超过 8 MB，请重新运行检测脚本。');
+    const extracted = jsonCandidates(source);
     let data;
-    candidates.forEach(candidate => {
+    extracted.candidates.forEach(candidate => {
       if (data) return;
-      try { const result = JSON.parse(candidate); if (result && typeof result === 'object' && 'schemaVersion' in result) data = result; } catch (_) { /* Search the next complete JSON block. */ }
+      try {
+        const result = JSON.parse(candidate);
+        if (result && typeof result === 'object' && !Array.isArray(result) && (Object.prototype.hasOwnProperty.call(result, 'schemaVersion') || hasDetectionFields(result))) data = result;
+      } catch (_) { /* Search the next complete JSON block. */ }
     });
-    if (!data) throw Error(start >= 0 ? 'JSON 没有复制完整，缺少结尾。请重新复制，或拖入完整 result.txt。' : '没有找到有效的检测 JSON。若你使用了免下载命令，请完整复制 PowerShell 输出。');
-    if (data.schemaVersion !== SCHEMA) throw Error('检测脚本版本过旧或不兼容，请重新生成工具包。');
+    if (!data) throw Error(extracted.hasUnclosedObject ? 'JSON 没有复制完整，缺少结尾。请重新复制，或拖入完整 result.txt。' : '没有找到有效的检测 JSON。若你使用了免下载命令，请完整复制 PowerShell 输出。');
+    if (Object.prototype.hasOwnProperty.call(data, 'schemaVersion') && data.schemaVersion !== SCHEMA) throw Error('你的检测脚本版本较旧，请重新下载最新版 ZIP 并再运行一次。');
+    if (!Object.prototype.hasOwnProperty.call(data, 'schemaVersion')) data.schemaVersionMissing = true;
     ['meta', 'env', 'exec', 'javaProbe', 'idea', 'emailScan'].forEach(key => {
       if (!data[key] || typeof data[key] !== 'object' || Array.isArray(data[key])) throw Error('检测结果缺少或损坏字段：' + key + '。请重新检测。');
     });
@@ -216,20 +245,21 @@
   }
   function parseAnyResult(text) {
     try { return parseResult(text); } catch (jsonError) {
-      if (/JAVA_HOME\s*=|(?:openjdk|java)(?:\s+java)?\s+(?:version|版本)|javac/i.test(String(text))) return parseManualResult(text);
+      const recognition = resultInputRecognition(text);
+      if (recognition.manual && !/^\s*\{/.test(String(text))) return parseManualResult(text);
       throw jsonError;
     }
   }
   function crossPasteIssue(text, target) {
     const source = String(text || '').trim();
     if (!source) return null;
-    const checkMarkers = /schemaVersion|JAVA_HOME|(?:^|["\s,{])exec(?:["\s,:}]|$)/i;
-    const portalMarkers = /sign\s*in|log\s*in|licenses?|educational|create\s+account|登录|注册|订阅/i;
-    if (target === 'result' && (portalMarkers.test(source) || !checkMarkers.test(source))) {
-      return { target: 'portal-return-text', message: '这看起来是官网页面文本，不是检测结果。检测结果应该是运行 JavaCheck.bat 后生成的。请把它粘到下面 B 区的框里，或回到第 1 步重新运行脚本。' };
-    }
-    if (target === 'portal' && (/^\s*\{/.test(source) || checkMarkers.test(source))) {
-      return { target: 'input', message: '这看起来是检测结果 JSON，不是官网页面文本。请把它粘到上面第 2 步的框里，或回到第 6 步复制 licenses 页面内容。' };
+    // 框 1 只由 resultInputRecognition 的正向特征决定；这里绝不以网页词反向猜测。
+    if (target === 'result') return null;
+    const schemaJson = parsedTopLevelJson(source);
+    const isDetectionJson = Boolean(schemaJson && Object.prototype.hasOwnProperty.call(schemaJson, 'schemaVersion'));
+    const hasSchemaAndHome = /schemaVersion/i.test(source) && /JAVA_HOME/i.test(source);
+    if (target === 'portal' && (isDetectionJson || hasSchemaAndHome)) {
+      return { target: 'paste-detection', message: '这是检测结果 JSON，请把它粘到 A3 的本机框里，再开始分析。' };
     }
     return null;
   }
@@ -435,7 +465,7 @@
     return '\uFEFF' + mask(lines.join('\r\n'));
   }
 
-  const api = { SCHEMA, EDU_DOMAIN_WHITELIST, RELEASE_URL, pathKey, mask, normalizeEmail, emailDomain, isEduDomain, machineEvidence, extractEmails, analyzePortalReturn, resolveStudentEvidence, crossPasteIssue, crc32, createZip, parseZip, parseResult, parseManualResult, parseAnyResult, analyze, packageEntries, sha256, buildHumanReport };
+  const api = { SCHEMA, PAGE_VERSION, EDU_DOMAIN_WHITELIST, RELEASE_URL, pathKey, mask, normalizeEmail, emailDomain, isEduDomain, machineEvidence, extractEmails, analyzePortalReturn, resolveStudentEvidence, resultInputRecognition, crossPasteIssue, crc32, createZip, parseZip, parseResult, parseManualResult, parseAnyResult, analyze, packageEntries, sha256, buildHumanReport };
   root.Checker = api;
   if (typeof module !== 'undefined') module.exports = api;
   if (typeof document === 'undefined') return;
@@ -458,26 +488,47 @@
     const warning = $('device-warning'); if (!warning) return;
     warning.hidden = /Windows/i.test(navigator.userAgent || '') && window.innerWidth >= 720;
   }
+  function updateRefreshNotice() {
+    const notice = $('refresh-notice'); if (!notice) return;
+    const script = document.querySelector('script[src*="assets/app.js"]');
+    let resourceVersion = '';
+    try { resourceVersion = script ? new URL(script.src, window.location.href).searchParams.get('v') || '' : ''; } catch (_) { /* Keep the notice hidden when the URL is unavailable. */ }
+    notice.hidden = !resourceVersion || resourceVersion === PAGE_VERSION;
+  }
   function currentWitness() {
     const email = $('idea-account-email');
     const confirmed = $('idea-account-confirmed');
     return { email: email ? email.value : '', confirmed: Boolean(confirmed && confirmed.checked) };
   }
   function currentPortal() {
-    const text = $('portal-return-text');
-    return { text: text ? text.value : '', loginConfirmed: portalLoginConfirmed };
+    const text = $('paste-licenses');
+    const value = text ? text.value : '';
+    // B3 可独立粘贴；只要有文本就按登录态规则判断，而不是要求先点确认按钮。
+    return { text: value, loginConfirmed: portalLoginConfirmed || Boolean(value.trim()) };
   }
   function setPasteState(id, text, state) {
     const node = $(id); if (!node) return;
     node.textContent = text;
     node.dataset.state = state || 'empty';
   }
-  function focusPasteTarget(id) {
-    const node = $(id); if (!node) return;
+  function focusOrExplain(id, message, fallbackId) {
+    const node = $(id);
+    if (!node) {
+      notify(message || '这一步还没准备好，请先完成上一步');
+      const fallback = $(fallbackId) || $('paste-detection');
+      if (fallback) {
+        fallback.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        fallback.classList.add('paste-target');
+        fallback.focus({ preventScroll: true });
+        setTimeout(() => fallback.classList.remove('paste-target'), 1800);
+      }
+      return false;
+    }
     node.scrollIntoView({ behavior: 'smooth', block: 'center' });
     node.classList.add('paste-target');
     node.focus({ preventScroll: true });
     setTimeout(() => node.classList.remove('paste-target'), 1800);
+    return true;
   }
   function showPasteGuidance(id, issue) {
     const node = $(id); if (!node) return;
@@ -485,8 +536,24 @@
     if (!issue) return;
     const text = document.createElement('p'); text.textContent = issue.message;
     const button = document.createElement('button'); button.type = 'button'; button.textContent = '带我去正确的框';
-    button.addEventListener('click', () => focusPasteTarget(issue.target));
+    button.addEventListener('click', () => focusOrExplain(issue.target, '这一步还没准备好，请先完成上一步', 'paste-detection'));
     node.append(text, button);
+  }
+  function showInputFailure(message, downloadLink) {
+    const node = $('input-guidance'); if (!node) return;
+    node.replaceChildren();
+    const text = document.createElement('p'); text.textContent = message;
+    node.append(text);
+    if (downloadLink) {
+      const link = document.createElement('a'); link.href = RELEASE_URL; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = '下载最新版 ZIP';
+      node.append(link);
+    }
+  }
+  function setResultUnlock(unlocked) {
+    const hint = $('unlock-hint'); const resultStep = $('result-step'); const recheckStep = $('recheck-step');
+    if (hint) hint.hidden = unlocked;
+    if (resultStep) resultStep.hidden = !unlocked;
+    if (recheckStep) recheckStep.hidden = !unlocked;
   }
   function badgeText(status) {
     return { PASS: 'PASS · 通过', FAIL: 'FAIL · 未通过', WARN: 'WARN · 提示', MANUAL: '需人工确认' }[status] || '需人工确认';
@@ -514,7 +581,7 @@
     const summary = $('auth-summary');
     if (summary) summary.textContent = studentTierCopy(student)[1] + ' 证据优先级：官网登录回传 → IDEA 人证邮箱 → 机器证据。';
     const copyStep = $('portal-copy-step');
-    if (copyStep) copyStep.hidden = !portalLoginConfirmed;
+    if (copyStep) copyStep.hidden = false;
     const back = $('portal-back-login');
     if (back) back.hidden = student.official.state !== 'NOT_LOGGED_IN';
     const finish = $('portal-finish');
@@ -523,18 +590,42 @@
       const evidence = student.official.emails.length ? student.official.emails.join('、') : student.official.whitelistLiteral ? 'dnui.edu.cn' : '未读到邮箱';
       setPasteState('portal-paste-state', '已粘贴：检测到域名/邮箱证据 ' + evidence + '。');
     } else if (student.official.state === 'NOT_LOGGED_IN') setPasteState('portal-paste-state', '已粘贴，但看起来仍是未登录页面。');
-    else setPasteState('portal-paste-state', $('portal-return-text').value.trim() ? '已粘贴，等待判断。' : '未粘贴官网页面文本');
+    else setPasteState('portal-paste-state', $('paste-licenses').value.trim() ? '已粘贴，等待判断。' : '未粘贴官网页面文本');
+  }
+  function renderStandaloneAuth() {
+    const witness = currentWitness();
+    const portal = analyzePortalReturn(currentPortal());
+    setAuthBlock('machine', { status: 'MANUAL', value: '尚未导入 A 部分检测结果。', advice: '这部分需要 A 部分的检测结果。你可以先做 B2、B3、B4。' });
+    setAuthBlock('witness', {
+      status: witness.email && witness.confirmed ? 'MANUAL' : 'MANUAL',
+      value: witness.email && witness.confirmed ? { email: mask(witness.email), state: '已填写，等待与 A 部分机器证据合并判断' } : '尚未填写',
+      advice: witness.email && witness.confirmed ? '已记录脱敏人证邮箱。无需等待 A 部分即可继续 B3、B4；A 部分结果回来后会合并判断。' : '你可以现在独立填写 IDEA 当前账户邮箱，再继续 B3、B4。'
+    });
+    const portalStatus = portal.kind === 'WHITELIST' ? 'PASS' : portal.kind === 'OTHER' ? 'WARN' : 'MANUAL';
+    setAuthBlock('portal', { status: portalStatus, value: portal.emails.length ? { emailEvidence: portal.emails.map(mask) } : '未粘贴官网文本', advice: portal.message });
+    setAuthBlock('final', { status: 'MANUAL', value: '仍需在 IDEA 中本人确认', advice: '完成 B2、B3 后，仍需在 IDEA 的订阅管理中本人确认。' });
+    const summary = $('auth-summary');
+    if (summary) summary.textContent = '建议先完成 A 部分，但 B 部分可以独立进行。证据优先级：官网登录回传 → IDEA 人证邮箱 → 机器证据。';
+    const finish = $('portal-finish'); if (finish) finish.hidden = portal.state !== 'LOGGED_IN';
+    if (portal.state === 'LOGGED_IN') {
+      const evidence = portal.emails.length ? portal.emails.map(mask).join('、') : portal.whitelistLiteral ? 'dnui.edu.cn' : '未读到邮箱';
+      setPasteState('portal-paste-state', '已粘贴：检测到域名/邮箱证据 ' + evidence + '。', 'filled');
+    } else if (portal.state === 'NOT_LOGGED_IN') setPasteState('portal-paste-state', '已粘贴，但看起来仍是未登录页面。');
+    else setPasteState('portal-paste-state', $('paste-licenses').value.trim() ? '已粘贴，等待判断。' : '未粘贴官网页面文本');
   }
   function render() {
     try {
-      const source = $('input').value;
-      const issue = crossPasteIssue(source, 'result');
-      if (issue) { showPasteGuidance('input-guidance', issue); notify(issue.message); return; }
+      const source = $('paste-detection').value;
+      const recognition = resultInputRecognition(source);
+      if (!recognition.recognized) {
+        const message = '没能识别出这是检测结果。请确认你复制的是运行 JavaCheck.bat 后生成的完整内容，或把同目录的 result.txt 拖进这个框。如果还是不行，重新运行一次检测脚本。';
+        showInputFailure(message); setPasteState('input-state', '未识别到检测结果。'); setResultUnlock(false); renderStandaloneAuth(); notify(message); return;
+      }
       showPasteGuidance('input-guidance', null);
       const data = parseAnyResult(source); analysis = analyze(data, currentWitness(), currentPortal()); const host = $('cards'); host.replaceChildren();
       $('summary').textContent = analysis.summary; $('overall').textContent = { FAIL: '环境配置未通过', PASS: '环境配置通过', WARN: '核心环境可用，请留意提示', MANUAL: '部分信息需要人工确认' }[analysis.status]; $('overall').className = 'badge ' + analysis.status;
       const age = Math.floor((Date.now() - Date.parse(data.meta.collectedAt)) / 60000);
-      $('meta').textContent = '采集时间：' + data.meta.collectedAt + ' · 用户：' + mask(data.meta.user) + '。请确认这是你自己的最新结果。' + (age > 30 ? ' 这是 ' + age + ' 分钟前的结果，建议重新检测。' : age < -5 ? ' 采集时间晚于当前时间，请核对电脑时钟。' : '');
+      $('meta').textContent = '采集时间：' + data.meta.collectedAt + ' · 用户：' + mask(data.meta.user) + '。请确认这是你自己的最新结果。' + (data.schemaVersionMissing ? ' 未识别到版本号。' : '') + (age > 30 ? ' 这是 ' + age + ' 分钟前的结果，建议重新检测。' : age < -5 ? ' 采集时间晚于当前时间，请核对电脑时钟。' : '');
       setPasteState('input-state', '已粘贴：检测到采集时间 ' + data.meta.collectedAt + '，用户：' + mask(data.meta.user || '未提供') + '。');
       if ($('manual-boundary')) { $('manual-boundary').hidden = !analysis.manual; $('manual-boundary').textContent = analysis.manual ? analysis.manualNotice : ''; }
       const heading = document.createElement('h3'); heading.textContent = 'A. Java 环境配置'; host.append(heading);
@@ -546,12 +637,17 @@
         const advice = document.createElement('p'); advice.textContent = item.advice;
         row.append(title, badge, actual, advice); host.append(row);
       });
-      $('repair').hidden = !analysis.repair; $('repair').textContent = analysis.repairLabel; $('export').disabled = false; $('confirmation').hidden = false;
+      const hasAFail = analysis.cards.some(item => item.area === 'A' && item.status === 'FAIL');
+      $('repair').hidden = !analysis.repair || !hasAFail; $('repair').textContent = analysis.repairLabel;
+      const repairState = $('repair-state'); if (repairState) { repairState.hidden = hasAFail; repairState.textContent = hasAFail ? '' : '环境正常，无需修复'; }
+      $('export').disabled = false; setResultUnlock(true);
       renderAuth(analysis);
       notify('已在浏览器本地完成分析，没有上传任何数据。');
     } catch (error) {
-      analysis = null; $('repair').hidden = true; $('export').disabled = true; $('cards').replaceChildren(); $('summary').textContent = '请重新导入完整结果'; $('overall').textContent = ''; $('confirmation').hidden = true;
+      analysis = null; $('repair').hidden = true; const repairState = $('repair-state'); if (repairState) repairState.hidden = true; $('export').disabled = true; $('cards').replaceChildren(); $('summary').textContent = '请重新导入完整结果'; $('overall').textContent = ''; setResultUnlock(false);
       if ($('manual-boundary')) $('manual-boundary').hidden = true; notify(error.message);
+      showInputFailure(error.message, /重新下载最新版 ZIP/.test(error.message));
+      renderStandaloneAuth();
     }
   }
   async function copyManual() {
@@ -559,7 +655,7 @@
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(command);
       else { const helper = document.createElement('textarea'); helper.value = command; document.body.append(helper); helper.select(); document.execCommand('copy'); helper.remove(); }
-      notify('检查命令已复制。按 Win+X 打开 Windows PowerShell，粘贴并回车后，把完整输出复制到第 2 步。');
+      notify('检查命令已复制。按 Win+X 打开 Windows PowerShell，粘贴并回车后，把完整输出复制到 A3。');
     } catch (_) { notify('浏览器没有允许复制。请手动复制页面显示的检查命令。'); }
   }
   function buildPackage() {
@@ -568,19 +664,21 @@
   }
   async function importFile(file) {
     if (!file) return; if (file.size > 8 * 1024 * 1024) { notify('文件超过 8 MB，请选择检测生成的 result.txt。'); return; }
-    $('input').value = await file.text(); render();
+    $('paste-detection').value = await file.text(); render();
   }
-  updateDeviceWarning(); window.addEventListener('resize', updateDeviceWarning);
+  updateDeviceWarning(); updateRefreshNotice(); window.addEventListener('resize', updateDeviceWarning);
   $('generate').addEventListener('click', buildPackage); $('analyze').addEventListener('click', render); $('manual-copy').addEventListener('click', copyManual);
-  $('clear').addEventListener('click', () => { const email = $('idea-account-email'); const confirmed = $('idea-account-confirmed'); const portal = $('portal-return-text'); if (email) email.value = ''; if (confirmed) confirmed.checked = false; if (portal) portal.value = ''; portalLoginConfirmed = false; showPasteGuidance('portal-guidance', null); setPasteState('portal-paste-state', '未粘贴官网页面文本'); if (analysis) render(); notify('已清空本页认证输入；页面不会保存邮箱或官网页面文本。'); });
-  ['idea-account-email', 'idea-account-confirmed'].forEach(id => { const element = $(id); if (element) element.addEventListener(id === 'idea-account-confirmed' ? 'change' : 'input', () => { if (analysis) render(); }); });
-  $('portal-return-text').addEventListener('input', () => { const issue = crossPasteIssue($('portal-return-text').value, 'portal'); showPasteGuidance('portal-guidance', issue); if (issue) { notify(issue.message); return; } if (analysis) render(); });
-  $('portal-login-done').addEventListener('click', () => { portalLoginConfirmed = true; if (analysis) render(); notify('请打开订阅管理页并复制登录后的页面文本，再粘贴到第 6 步框。'); });
-  $('portal-back-login').addEventListener('click', () => { portalLoginConfirmed = false; const portal = $('portal-return-text'); if (portal) portal.value = ''; showPasteGuidance('portal-guidance', null); setPasteState('portal-paste-state', '未粘贴官网页面文本'); if (analysis) render(); notify('已回到官网登录引导。请先在 JetBrains 官方网站登录。'); });
+  $('clear').addEventListener('click', () => { const email = $('idea-account-email'); const confirmed = $('idea-account-confirmed'); const portal = $('paste-licenses'); if (email) email.value = ''; if (confirmed) confirmed.checked = false; if (portal) portal.value = ''; portalLoginConfirmed = false; showPasteGuidance('portal-guidance', null); setPasteState('portal-paste-state', '未粘贴官网页面文本'); if (analysis) render(); else renderStandaloneAuth(); notify('已清空本页认证输入；页面不会保存邮箱或官网页面文本。'); });
+  ['idea-account-email', 'idea-account-confirmed'].forEach(id => { const element = $(id); if (element) element.addEventListener(id === 'idea-account-confirmed' ? 'change' : 'input', () => { if (analysis) render(); else renderStandaloneAuth(); }); });
+  $('paste-licenses').addEventListener('input', () => { const issue = crossPasteIssue($('paste-licenses').value, 'portal'); showPasteGuidance('portal-guidance', issue); if (issue) { notify(issue.message); return; } if (analysis) render(); else renderStandaloneAuth(); });
+  $('portal-login-done').addEventListener('click', () => { portalLoginConfirmed = true; if (analysis) render(); else renderStandaloneAuth(); notify('请打开订阅管理页并复制登录后的页面文本，再粘贴到 B3 框。'); });
+  $('portal-back-login').addEventListener('click', () => { portalLoginConfirmed = false; const portal = $('paste-licenses'); if (portal) portal.value = ''; showPasteGuidance('portal-guidance', null); setPasteState('portal-paste-state', '未粘贴官网页面文本'); if (analysis) render(); else renderStandaloneAuth(); notify('已回到官网登录引导。请先在 JetBrains 官方网站登录。'); });
   $('repair').addEventListener('click', () => notify('请关闭当前黑色窗口，回到刚才解压的同一个文件夹，双击 JavaRepair.bat。修复结束后，再双击 JavaCheck.bat 重新检测。'));
   $('export').addEventListener('click', () => { if (analysis) download(encode(buildHumanReport(analysis)), 'java-idea-check-result.txt', 'text/plain;charset=utf-8'); });
   $('file').addEventListener('change', event => importFile(event.target.files[0]).catch(error => notify(error.message)));
-  $('input').addEventListener('input', () => { const issue = crossPasteIssue($('input').value, 'result'); showPasteGuidance('input-guidance', issue); if (issue) { notify(issue.message); return; } setPasteState('input-state', $('input').value.trim() ? '已粘贴检测结果：点击“开始分析”查看结论。' : '未粘贴检测结果'); });
-  $('input').addEventListener('dragover', event => event.preventDefault());
-  $('input').addEventListener('drop', event => { event.preventDefault(); importFile(event.dataTransfer.files[0]).catch(error => notify(error.message)); });
+  $('paste-detection').addEventListener('input', () => { showPasteGuidance('input-guidance', null); setPasteState('input-state', $('paste-detection').value.trim() ? '已粘贴检测结果：点击“开始分析”查看结论。' : '未粘贴检测结果'); });
+  $('paste-detection').addEventListener('dragover', event => event.preventDefault());
+  $('paste-detection').addEventListener('drop', event => { event.preventDefault(); importFile(event.dataTransfer.files[0]).catch(error => notify(error.message)); });
+  renderStandaloneAuth();
+  const dismissRefresh = $('refresh-notice-dismiss'); if (dismissRefresh) dismissRefresh.addEventListener('click', () => { const notice = $('refresh-notice'); if (notice) notice.hidden = true; });
 })(typeof globalThis !== 'undefined' ? globalThis : window);

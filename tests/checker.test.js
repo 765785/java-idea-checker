@@ -159,17 +159,16 @@ test('N55/N58: logged-in DNUI subscription text is highest-priority evidence', (
   assert.equal(result.student.source, 'portal');
   assert.equal(result.student.official.state, 'LOGGED_IN');
 });
-test('N57/N58/Q29: static B flow has no password field and keeps the four blocks in order', () => {
+test('N57/N58/Q29/N70: static B flow has no password field, keeps the four blocks in order, and never hides B3', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   assert.doesNotMatch(html, /type=["']password["']/i);
   assert.match(html, /不会看到、不会保存，也不会要求你填写密码/);
   const positions = ['auth-machine', 'auth-witness', 'auth-portal', 'auth-final'].map(id => html.indexOf('id="' + id + '"'));
   assert.ok(positions.every(position => position >= 0));
   assert.deepEqual(positions.slice().sort((a, b) => a - b), positions);
-  assert.ok(html.indexOf('id="portal-copy-step" hidden') > html.indexOf('id="portal-login-done"'));
-  assert.match(html, /第 1 步 \/ 共 3 步/);
-  assert.match(html, /第 2 步 \/ 共 3 步/);
-  assert.match(html, /这一步完成了，请继续看下面的最终动作/);
+  assert.match(html, /id="portal-copy-step"/);
+  assert.doesNotMatch(html, /id="portal-copy-step"[^>]*\bhidden/);
+  assert.match(html, /没登录就复制，页面会提示你回去登录/);
 });
 test('Q30: report records portal login state without the copied full email', () => {
   const data = bFixture();
@@ -179,34 +178,64 @@ test('Q30: report records portal login state without the copied full email', () 
   assert.match(report, /p\*\*\*@dnui\.edu\.cn/);
   assert.doesNotMatch(report, /private\.student@dnui\.edu\.cn/);
 });
-test('N59: the two paste targets are structurally separated and the portal target starts hidden', () => {
+test('N68/N69/N70/N72: A and B are independent, fixed-ID modules with two always-visible paste targets', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-  const local = html.indexOf('id="input"');
-  const recheck = html.indexOf('class="step recheck"');
-  const auth = html.indexOf('id="student-auth"');
-  const portal = html.indexOf('id="portal-return-text"');
-  assert.ok(local >= 0 && recheck > local && auth > recheck && portal > auth);
-  assert.match(html, /id="portal-copy-step" hidden/);
+  const appJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'app.js'), 'utf8');
+  for (const id of ['section-a', 'section-b', 'paste-detection', 'paste-licenses']) assert.match(html, new RegExp('id="' + id + '"'));
+  assert.match(html, /href="#section-a"/);
+  assert.match(html, /href="#section-b"/);
+  for (const step of ['A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'B3', 'B4']) assert.match(html, new RegExp(step));
+  assert.doesNotMatch(html, /第\s*[1-6]\s*步/);
+  assert.doesNotMatch(html, /id="confirmation"[^>]*\bhidden/);
+  assert.match(html, /这部分需要 A 部分的检测结果。你可以先做 B2、B3、B4。/);
+  assert.match(appJs, /function renderStandaloneAuth\(\)/);
+  assert.doesNotMatch(appJs, /\$\('confirmation'\)\.hidden\s*=/);
+  for (const id of ['paste-detection', 'paste-licenses']) assert.doesNotMatch(html, new RegExp('id="' + id + '"[^>]*(?:hidden|disabled)'));
 });
-test('N60: cross-pasted portal text is blocked before result parsing', () => {
-  const issue = app.crossPasteIssue('Sign in to view your Educational Licenses', 'result');
-  assert.equal(issue.target, 'portal-return-text');
-  assert.match(issue.message, /官网页面文本/);
-  assert.match(issue.message, /JavaCheck\.bat/);
+test('N62: result recognition is positive-only and accepts schema-2 JSON containing license page words', () => {
+  const data = fixture();
+  data.idea.license = 'Educational Licenses · Sign in history';
+  data.meta.license = 'PermanentUserId';
+  const text = JSON.stringify(data);
+  assert.equal(app.resultInputRecognition(text).recognized, true);
+  assert.equal(app.crossPasteIssue(text, 'result'), null);
+  assert.notEqual(app.analyze(app.parseAnyResult(text)).status, 'FAIL');
 });
-test('N60: cross-pasted detection JSON is blocked before portal parsing', () => {
+test('N62: console JSON, path-A plain text, and only those positive forms are recognized', () => {
+  const data = fixture();
+  const consoleText = '正在检查 JAVA_HOME；\n正在扫描 IDEA 配置；\n' + JSON.stringify(data) + '\n完成。';
+  const manual = [
+    'JAVA_HOME=C:\\Java\\jdk-25', 'java version "25.0.1"', 'javac 25.0.1', 'C:\\Java\\jdk-25\\bin\\javac.exe'
+  ].join('\n');
+  assert.equal(app.resultInputRecognition(consoleText).recognized, true);
+  assert.equal(app.parseAnyResult(consoleText).schemaVersion, 2);
+  assert.equal(app.resultInputRecognition(manual).recognized, true);
+  assert.equal(app.parseAnyResult(manual).manualOnly, true);
+  assert.equal(app.resultInputRecognition('Sign in to view your Educational Licenses').recognized, false);
+  assert.equal(app.resultInputRecognition('').recognized, false);
+});
+test('N63: only schema JSON or schemaVersion plus JAVA_HOME is redirected from the portal box', () => {
   const issue = app.crossPasteIssue('{"schemaVersion":2,"JAVA_HOME":"C:\\\\JDK","exec":{}}', 'portal');
-  assert.equal(issue.target, 'input');
+  assert.equal(issue.target, 'paste-detection');
   assert.match(issue.message, /检测结果 JSON/);
-  assert.match(issue.message, /第 2 步/);
+  assert.match(issue.message, /A3/);
+  assert.equal(app.crossPasteIssue('This subscription page mentions java only.', 'portal'), null);
+  assert.equal(app.crossPasteIssue('JAVA_HOME appears in an article.', 'portal'), null);
 });
-test('N61/Q31/Q32: paste targets expose distinct labels, states, summaries and jump guidance', () => {
+test('N64: old schema has the ZIP update message; missing schema remains analyzable and marked', () => {
+  const old = fixture(); old.schemaVersion = 1;
+  assert.throws(() => app.parseAnyResult(JSON.stringify(old)), /重新下载最新版 ZIP/);
+  const missing = fixture(); delete missing.schemaVersion;
+  const parsed = app.parseAnyResult(JSON.stringify(missing));
+  assert.equal(parsed.schemaVersionMissing, true);
+});
+test('N61/N71/N73: paste targets expose distinct labels, states, summaries and protected jump guidance', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const appJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'app.js'), 'utf8');
   const css = fs.readFileSync(path.join(__dirname, '..', 'assets', 'auth-flow.css'), 'utf8');
-  assert.match(html, /本机<\/span>第 2 步：粘贴 JavaCheck 检测结果/);
-  assert.match(html, /官网<\/span>第 6 步：官网登录回传/);
-  assert.match(html, /在这里按 Ctrl\+V 粘贴运行结果（或拖入 result\.txt）/);
+  assert.match(html, /本机<\/span>A3 粘贴 JavaCheck 检测结果/);
+  assert.match(html, /官网<\/span>B3 官网登录后复制文本/);
+  assert.match(html, /在这里按 Ctrl\+V 粘贴运行结果，或拖入 result\.txt/);
   assert.match(html, /在这里按 Ctrl\+V 粘贴 JetBrains 官网页面的内容/);
   assert.match(html, /id="input-state"/);
   assert.match(html, /id="portal-paste-state"/);
@@ -216,6 +245,19 @@ test('N61/Q31/Q32: paste targets expose distinct labels, states, summaries and j
   assert.match(css, /\.paste-box\.local-paste/);
   assert.match(css, /\.paste-box\.portal-paste/);
   assert.match(css, /\.paste-target/);
+});
+test('N65/N66/N67: focus fallback, locked-step explanation, normal repair copy, version and cache tokens are present', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const appJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'app.js'), 'utf8');
+  assert.match(appJs, /function focusOrExplain\(id, message, fallbackId\)/);
+  assert.match(appJs, /这一步还没准备好，请先完成上一步/);
+  assert.match(html, /id="unlock-hint"[^>]*>先完成上面的检测并粘贴结果，之后这里会出现修复选项。/);
+  assert.match(html, /id="result-step" class="step" hidden/);
+  assert.match(html, /id="recheck-step" class="step recheck" hidden/);
+  assert.match(appJs, /环境正常，无需修复/);
+  assert.match(html, /版本 v1\.3\.0 · 更新日期 2026-09-25/);
+  for (const asset of ['style.css', 'auth-flow.css', 'script-template.js', 'app.js']) assert.match(html, new RegExp('assets/' + asset.replace('.', '\\.') + '\\?v=1\\.3\\.0'));
+  assert.match(html, /id="refresh-notice"[^>]*hidden/);
 });
 test('N38: deterministic ZIP ignores prior email input paths', () => {
   const first = app.createZip(app.packageEntries());
@@ -246,7 +288,7 @@ test('console extraction respects quoted braces', () => {
 });
 test('old schema rejected', () => {
   const data = fixture(); data.schemaVersion = 1;
-  assert.throws(() => app.parseResult(JSON.stringify(data)), /版本过旧/);
+  assert.throws(() => app.parseResult(JSON.stringify(data)), /重新下载最新版 ZIP/);
 });
 test('truncated JSON explains next step', () => {
   assert.throws(() => app.parseResult('{"schemaVersion":2'), /没有复制完整/);

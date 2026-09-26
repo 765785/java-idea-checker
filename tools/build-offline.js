@@ -55,21 +55,21 @@ function build() {
 
   html = replaceExactly(
     html,
-    '<link rel="stylesheet" href="assets/style.css">',
+    '<link rel="stylesheet" href="assets/style.css?v=1.3.0">',
     '<style data-offline-inline="style">\n' + css + '\n</style>',
     'The stylesheet link'
   );
-  html = replaceExactly(html, '<link rel="stylesheet" href="assets/auth-flow.css">', '', 'The authentication stylesheet link');
+  html = replaceExactly(html, '<link rel="stylesheet" href="assets/auth-flow.css?v=1.3.0">', '', 'The authentication stylesheet link');
 
   html = replaceExactly(
     html,
-    '<script src="assets/script-template.js" defer></script>',
+    '<script src="assets/script-template.js?v=1.3.0" defer></script>',
     '',
     'The script-template.js script tag'
   );
   html = replaceExactly(
     html,
-    '<script src="assets/app.js" defer></script>',
+    '<script src="assets/app.js?v=1.3.0" defer></script>',
     '',
     'The app.js script tag'
   );
