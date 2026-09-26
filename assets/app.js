@@ -283,7 +283,7 @@
     card(cards, 'B', '机器认证证据', 'MANUAL', '免下载路径不会扫描 IDEA、Toolbox 或教育邮箱。', boundary);
     card(cards, 'B', '人证：IDEA 当前登录账户', 'MANUAL', { email: student.witnessMasked || '未填写', participates: '免下载路径不参与自动升档' }, '免下载路径无法确认 IDEA 是否安装或启动，请在完整检测后再填写 IDEA 当前账户人证。');
     card(cards, 'B', '官网登录回传', student.official.kind === 'WHITELIST' ? 'PASS' : student.official.kind === 'OTHER' ? 'WARN' : 'MANUAL', { loginStatus: student.official.state, emailEvidence: student.official.emails }, student.official.message);
-    card(cards, 'B', '最终动作', 'MANUAL', { tier: 'MANUAL', portalLoginStatus: student.official.state }, boundary + ' Manage Subscriptions → 找不到教育包时 Refresh license list → 选择教育包并 Activate。');
+    card(cards, 'B', '最终动作', 'MANUAL', { tier: 'MANUAL', portalLoginStatus: student.official.state }, boundary + ' 回到 IDEA，按 B4 的四步确认自己的 edu 邮箱即可。');
     const failed = cards.some(item => item.area === 'A' && item.status === 'FAIL');
     return { cards, summary: failed ? 'Java 环境的简化检查发现问题，需要安装或配置完整 JDK。' : 'Java 核心命令可以运行；学生认证尚未检查。', status: failed ? 'FAIL' : 'MANUAL', repair: failed, repairLabel: '运行 ZIP 内的 JavaRepair.bat', data, student, manual: true, manualNotice: boundary };
   }
@@ -427,7 +427,7 @@
     card(cards, 'B', '官网登录回传', portalStatus, { loginStatus: student.official.state, emailEvidence: student.official.emails, textLength: student.official.length, domainLiteral: student.official.whitelistLiteral ? '检测到' : '未检测到' }, student.official.message);
     const label = studentTierCopy(student);
     const conflictNote = student.conflicts.length ? ' 还发现了不同的脱敏邮箱；请以官网登录回传或 IDEA 左下角当前显示的账户为准。' : '';
-    card(cards, 'B', '最终动作', label[0], { tier: student.tier, prioritySource: student.source, witness: student.witnessMasked || '未填写', portalLoginStatus: student.official.state, portalEmailEvidence: student.official.emails, machineStatus: student.machine.status, conflicts: student.conflicts }, label[1] + conflictNote + ' 回到 IDEA：Manage Subscriptions → 必要时 Refresh license list → 选择教育包并 Activate。以上只说明账号证据，不作教育包状态的确定性结论。');
+    card(cards, 'B', '最终动作', label[0], { tier: student.tier, prioritySource: student.source, witness: student.witnessMasked || '未填写', portalLoginStatus: student.official.state, portalEmailEvidence: student.official.emails, machineStatus: student.machine.status, conflicts: student.conflicts }, label[1] + conflictNote + ' 回到 IDEA，按 B4 的四步确认自己的 edu 邮箱即可。教育包是否真的能用，以你在 IDEA 里看到的状态为准。');
     const failures = cards.filter(item => item.area === 'A' && item.status === 'FAIL');
     const summary = !complete ? jreOnly ? '你当前只有 Java 运行能力，不能编译代码，需要安装完整 JDK。' : '你的电脑未找到可用 Java 开发工具（JDK），需要先安装。' : failures.length ? consistency === 'FAIL' ? 'JDK 已安装，但实际运行的版本与配置不一致。' : 'JDK 装好了，但环境变量没配对。' : newer ? '当前 JDK 可以使用，本机另有更新版本，请按课程要求选择。' : 'Java 核心检查通过，可以开始使用；请留意下方提示。';
     const repairLabel = !complete
@@ -603,7 +603,7 @@
     });
     const portalStatus = portal.kind === 'WHITELIST' ? 'PASS' : portal.kind === 'OTHER' ? 'WARN' : 'MANUAL';
     setAuthBlock('portal', { status: portalStatus, value: portal.emails.length ? { emailEvidence: portal.emails.map(mask) } : '未粘贴官网文本', advice: portal.message });
-    setAuthBlock('final', { status: 'MANUAL', value: '仍需在 IDEA 中本人确认', advice: '完成 B2、B3 后，仍需在 IDEA 的订阅管理中本人确认。' });
+    setAuthBlock('final', { status: 'MANUAL', value: '仍需在 IDEA 中本人确认', advice: '回到 IDEA，按 B4 的四步确认自己的 edu 邮箱即可。' });
     const summary = $('auth-summary');
     if (summary) summary.textContent = '建议先完成 A 部分，但 B 部分可以独立进行。证据优先级：官网登录回传 → IDEA 人证邮箱 → 机器证据。';
     const finish = $('portal-finish'); if (finish) finish.hidden = portal.state !== 'LOGGED_IN';
