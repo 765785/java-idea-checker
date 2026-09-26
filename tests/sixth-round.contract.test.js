@@ -264,9 +264,8 @@ test('N30/Q21: 免下载路径的中文版本输出只覆盖 Java，B 区恒为�
   assert.ok(bCards.every(card => card.status === 'MANUAL'), '免下载路径不得给学生认证任何通过结论');
   const bText = bCards.map(card => card.name + '\\n' + card.advice).join('\\n');
   assert.match(bText, /这是简化检查，只覆盖 Java 环境/);
-  assert.match(bText, /Manage Subscriptions/);
-  assert.match(bText, /Refresh license list/);
-  assert.match(bText, /Activate/);
+  assert.match(bText, /回到 IDEA，按 B4 的四步确认自己的 edu 邮箱即可/);
+  assert.doesNotMatch(bText, /Manage Subscriptions|Refresh license list|Activate/);
   assert.doesNotMatch(bText, /认证成功|认证正常/);
 });
 
